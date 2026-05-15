@@ -7,12 +7,15 @@ import { EngDirectorDetailPopup } from '../popups/EngDirectorDetailPopup';
 import { RaceDirectorDetailPopup } from '../popups/RaceDirectorDetailPopup';
 import { SortHeader } from '../common/SortHeader';
 import { RarityChip } from '../common/RarityChip';
+import { Flag } from '../common/Flag';
+import { TeamLogo } from '../common/TeamLogo';
 import { rarityOrder, toggleSort } from '../common/helpers';
 
 type HistorySubTab = 'drivers' | 'directors' | 'teams';
 type HistoryFilter = 'active' | 'retired' | 'all';
 
-// History tab with three sub-tabs: drivers, directors (eng/race), teams.
+// History tab — three sub-tabs (Drivers, Directors, Teams).
+// All three offer Active/Retired/All filters and sortable columns.
 export function HistoryTab() {
   const [sub, setSub] = useState<HistorySubTab>('drivers');
   return (
@@ -30,6 +33,36 @@ export function HistoryTab() {
   );
 }
 
+// Common filter row used by all three sub-tabs.
+function FilterRow({ filter, setFilter, extras }: {
+  filter: HistoryFilter;
+  setFilter: (f: HistoryFilter) => void;
+  extras?: React.ReactNode;
+}) {
+  return (
+    <div className="filter-row">
+      {extras}
+      <span className="filter-label">Show</span>
+      <div className="filter-chip-group">
+        <button onClick={() => setFilter('active')}  className={`filter-chip ${filter === 'active'  ? 'active' : ''}`}>Active</button>
+        <button onClick={() => setFilter('retired')} className={`filter-chip ${filter === 'retired' ? 'active' : ''}`}>Retired</button>
+        <button onClick={() => setFilter('all')}     className={`filter-chip ${filter === 'all'     ? 'active' : ''}`}>All</button>
+      </div>
+    </div>
+  );
+}
+
+// Status pill: green for active, gray for retired.
+function StatusPill({ retired }: { retired: boolean }) {
+  return (
+    <span className={`status-pill ${retired ? 'status-pill-retired' : 'status-pill-active'}`}>
+      {retired ? 'Retired' : 'Active'}
+    </span>
+  );
+}
+
+// ============================================================================
+// DRIVERS SUB-TAB
 // ============================================================================
 type DriverHistSort =
   | 'name' | 'rarity' | 'races' | 'wins' | 'podiums'
@@ -66,38 +99,40 @@ function DriverHistory() {
 
   return (
     <>
-      <div className="filter-row">
-        <span>Filter: </span>
-        <button onClick={() => setFilter('active')} className={filter === 'active' ? 'active' : ''}>Active</button>
-        <button onClick={() => setFilter('retired')} className={filter === 'retired' ? 'active' : ''}>Retired</button>
-        <button onClick={() => setFilter('all')} className={filter === 'all' ? 'active' : ''}>All</button>
-      </div>
-      <table className="data-table">
+      <FilterRow filter={filter} setFilter={setFilter} />
+      <table className="data-table history-list-table">
         <thead>
           <tr>
-            <SortHeader label="Name" k="name" curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="Driver" k="name" curr={sortKey} asc={sortAsc} onClick={onSort} />
             <SortHeader label="Rarity" k="rarity" curr={sortKey} asc={sortAsc} onClick={onSort} />
             <th>Status</th>
-            <SortHeader label="Races" k="races" curr={sortKey} asc={sortAsc} onClick={onSort} />
-            <SortHeader label="Wins" k="wins" curr={sortKey} asc={sortAsc} onClick={onSort} />
-            <SortHeader label="Podiums" k="podiums" curr={sortKey} asc={sortAsc} onClick={onSort} />
-            <SortHeader label="Poles" k="poles" curr={sortKey} asc={sortAsc} onClick={onSort} />
-            <SortHeader label="Points" k="points" curr={sortKey} asc={sortAsc} onClick={onSort} />
-            <SortHeader label="WC" k="championships" curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="Races"   k="races"         curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="Wins"    k="wins"          curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="Podiums" k="podiums"       curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="Poles"   k="poles"         curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="Points"  k="points"        curr={sortKey} asc={sortAsc} onClick={onSort} />
+            <SortHeader label="WC"      k="championships" curr={sortKey} asc={sortAsc} onClick={onSort} />
           </tr>
         </thead>
         <tbody>
           {sorted.map(d => (
             <tr key={d.id}>
-              <td><button className="link-btn" onClick={() => setPopupDriver(d)}>{d.name}</button></td>
+              <td className="cell-driver-name">
+                <Flag code={d.countryCode} title={d.country} />
+                <button className="link-btn driver-name-btn" onClick={() => setPopupDriver(d)}>{d.name}</button>
+              </td>
               <td><RarityChip rarity={d.rarity} /></td>
-              <td>{d.retired ? <span className="muted">Retired</span> : 'Active'}</td>
-              <td>{d.careerStarts}</td>
-              <td>{d.careerWins}</td>
-              <td>{d.careerPodiums}</td>
-              <td>{d.careerPoles}</td>
-              <td>{totalPoints(d)}</td>
-              <td>{d.careerChampionships}</td>
+              <td><StatusPill retired={d.retired} /></td>
+              <td className="num">{d.careerStarts}</td>
+              <td className="num"><strong>{d.careerWins}</strong></td>
+              <td className="num">{d.careerPodiums}</td>
+              <td className="num">{d.careerPoles}</td>
+              <td className="num">{totalPoints(d)}</td>
+              <td className="num">
+                {d.careerChampionships > 0 ? (
+                  <span className="champ-count">{d.careerChampionships}</span>
+                ) : '—'}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -107,6 +142,8 @@ function DriverHistory() {
   );
 }
 
+// ============================================================================
+// DIRECTORS SUB-TAB
 // ============================================================================
 function DirectorHistory() {
   const { state } = useGame();
@@ -129,45 +166,65 @@ function DirectorHistory() {
   const totalDriverWC = (h: DirectorYearRecord[]) => h.filter(y => y.driverWC).length;
   const totalConstructorWC = (h: DirectorYearRecord[]) => h.filter(y => y.constructorWC).length;
 
+  const list = kind === 'eng' ? engs : rds;
+  const sorted = [...list].sort((a, b) => totalTeamWins(b.yearHistory) - totalTeamWins(a.yearHistory));
+
   return (
     <>
-      <div className="filter-row">
-        <span>Type: </span>
-        <button onClick={() => setKind('eng')} className={kind === 'eng' ? 'active' : ''}>Engineering</button>
-        <button onClick={() => setKind('race')} className={kind === 'race' ? 'active' : ''}>Race</button>
-        <span style={{ marginLeft: 20 }}>Filter: </span>
-        <button onClick={() => setFilter('active')} className={filter === 'active' ? 'active' : ''}>Active</button>
-        <button onClick={() => setFilter('retired')} className={filter === 'retired' ? 'active' : ''}>Retired</button>
-        <button onClick={() => setFilter('all')} className={filter === 'all' ? 'active' : ''}>All</button>
-      </div>
-      <table className="data-table">
+      <FilterRow
+        filter={filter}
+        setFilter={setFilter}
+        extras={
+          <>
+            <span className="filter-label">Type</span>
+            <div className="filter-chip-group">
+              <button onClick={() => setKind('eng')}  className={`filter-chip ${kind === 'eng'  ? 'active' : ''}`}>Engineering</button>
+              <button onClick={() => setKind('race')} className={`filter-chip ${kind === 'race' ? 'active' : ''}`}>Race</button>
+            </div>
+            <span className="filter-divider" />
+          </>
+        }
+      />
+      <table className="data-table history-list-table">
         <thead>
           <tr>
-            <th>Name</th><th>Rarity</th><th>Status</th>
-            <th>Years Active</th><th>Team Wins</th><th>Driver WC</th><th>Constructor WC</th>
+            <th>Director</th>
+            <th>Rarity</th>
+            <th>Status</th>
+            <th className="num">Years</th>
+            <th className="num">Team Wins</th>
+            <th className="num">Driver WC</th>
+            <th className="num">Constructor WC</th>
           </tr>
         </thead>
         <tbody>
-          {(kind === 'eng' ? engs : rds)
-            .sort((a, b) => totalTeamWins(b.yearHistory) - totalTeamWins(a.yearHistory))
-            .map(d => (
-              <tr key={d.id}>
-                <td>
-                  <button
-                    className="link-btn"
-                    onClick={() => kind === 'eng'
-                      ? setPopupEng(d as EngineeringDirector)
-                      : setPopupRD(d as RaceDirector)}
-                  >{d.name}</button>
-                </td>
-                <td><RarityChip rarity={d.rarity} /></td>
-                <td>{d.retired ? <span className="muted">Retired</span> : 'Active'}</td>
-                <td>{yearsActive(d.yearHistory)}</td>
-                <td>{totalTeamWins(d.yearHistory)}</td>
-                <td>{totalDriverWC(d.yearHistory)}</td>
-                <td>{totalConstructorWC(d.yearHistory)}</td>
-              </tr>
-            ))}
+          {sorted.map(d => (
+            <tr key={d.id}>
+              <td className="cell-driver-name">
+                {d.countryCode && <Flag code={d.countryCode} title={d.country} />}
+                <button
+                  className="link-btn driver-name-btn"
+                  onClick={() => kind === 'eng'
+                    ? setPopupEng(d as EngineeringDirector)
+                    : setPopupRD(d as RaceDirector)}
+                >{d.name}</button>
+              </td>
+              <td><RarityChip rarity={d.rarity} /></td>
+              <td><StatusPill retired={d.retired} /></td>
+              <td className="num">{yearsActive(d.yearHistory)}</td>
+              <td className="num"><strong>{totalTeamWins(d.yearHistory)}</strong></td>
+              <td className="num">
+                {totalDriverWC(d.yearHistory) > 0
+                  ? <span className="champ-count">{totalDriverWC(d.yearHistory)}</span>
+                  : '—'}
+              </td>
+              <td className="num">
+                {totalConstructorWC(d.yearHistory) > 0
+                  ? <span className="champ-count">{totalConstructorWC(d.yearHistory)}</span>
+                  : '—'}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
       {popupEng && <EngDirectorDetailPopup director={popupEng} onClose={() => setPopupEng(null)} />}
@@ -177,36 +234,57 @@ function DirectorHistory() {
 }
 
 // ============================================================================
+// TEAMS SUB-TAB
+// ============================================================================
 function TeamHistory() {
   const { state } = useGame();
   const [popupTeam, setPopupTeam] = useState<Team | null>(null);
+
+  const sorted = [...state.teams].sort(
+    (a, b) => b.careerConstructorWC - a.careerConstructorWC || b.careerWins - a.careerWins
+  );
+
   return (
     <>
-      <table className="data-table">
+      <table className="data-table history-list-table">
         <thead>
           <tr>
-            <th>Team</th><th>Years</th><th>Wins</th><th>Podiums</th>
-            <th>Poles</th><th>Driver WC</th><th>Constructor WC</th>
+            <th>Team</th>
+            <th className="num">Seasons</th>
+            <th className="num">Wins</th>
+            <th className="num">Podiums</th>
+            <th className="num">Poles</th>
+            <th className="num">Driver WC</th>
+            <th className="num">Constructor WC</th>
           </tr>
         </thead>
         <tbody>
-          {[...state.teams]
-            .sort((a, b) => b.careerConstructorWC - a.careerConstructorWC || b.careerWins - a.careerWins)
-            .map(t => (
-              <tr key={t.id}>
-                <td>
-                  <button className="link-btn" style={{ color: t.color }} onClick={() => setPopupTeam(t)}>
+          {sorted.map(t => (
+            <tr key={t.id}>
+              <td>
+                <span className="constructor-cell">
+                  <TeamLogo team={t} size={28} />
+                  <button
+                    className="link-btn driver-name-btn"
+                    style={{ color: t.color }}
+                    onClick={() => setPopupTeam(t)}
+                  >
                     {t.name}
                   </button>
-                </td>
-                <td>{t.yearHistory.length}</td>
-                <td>{t.careerWins}</td>
-                <td>{t.careerPodiums}</td>
-                <td>{t.careerPoles}</td>
-                <td>{t.careerDriverWC}</td>
-                <td>{t.careerConstructorWC}</td>
-              </tr>
-            ))}
+                </span>
+              </td>
+              <td className="num">{t.yearHistory.length}</td>
+              <td className="num"><strong>{t.careerWins}</strong></td>
+              <td className="num">{t.careerPodiums}</td>
+              <td className="num">{t.careerPoles}</td>
+              <td className="num">
+                {t.careerDriverWC > 0 ? <span className="champ-count">{t.careerDriverWC}</span> : '—'}
+              </td>
+              <td className="num">
+                {t.careerConstructorWC > 0 ? <span className="champ-count">{t.careerConstructorWC}</span> : '—'}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
       {popupTeam && <TeamDetailPopup team={popupTeam} onClose={() => setPopupTeam(null)} />}

@@ -1042,7 +1042,10 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
 /* ============================================================================ */
 
 
-/* ----- Popup / modal ----- */
+/* ============================================================================
+   POPUPS (Driver / Team / Director detail modals)
+   ============================================================================ */
+
 .popup-overlay {
   position: fixed; inset: 0;
   background: rgba(21, 21, 30, 0.7);
@@ -1056,61 +1059,379 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
 .popup {
   background: white;
   border-radius: var(--r-md);
-  max-width: 800px;
+  max-width: 820px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: var(--shadow-pop);
   animation: popIn var(--t-slow) var(--ease);
+  position: relative;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: scale(0.95) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
-.popup-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: var(--sp-4) var(--sp-5);
-  border-bottom: 1px solid var(--border);
+/* Floating close button — sits over the hero band so it remains visible
+   regardless of the hero content layout */
+.popup-close-floating {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: 2;
+  width: 32px; height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 14px;
+  padding: 0;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--t-base) var(--ease);
 }
-.popup-header h2 {
-  margin: 0; font-size: 20px;
-  display: flex; align-items: center; gap: var(--sp-2);
+.popup-close-floating:hover {
+  background: var(--f1-red);
+  color: white;
+  border-color: var(--f1-red);
+  transform: scale(1.05);
 }
-.popup-body { padding: var(--sp-5); }
+
+/* Hero band at the top of every popup */
+.popup-hero {
+  background:
+    linear-gradient(110deg,
+      transparent 0%, transparent 49.5%,
+      rgba(255,255,255,0.025) 49.5%, rgba(255,255,255,0.025) 50%,
+      transparent 50%, transparent 100%),
+    linear-gradient(135deg, var(--f1-dark) 0%, var(--f1-dark-2) 100%);
+  background-size: 22px 100%, 100% 100%;
+  color: white;
+  padding: var(--sp-5) var(--sp-6);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Driver hero: flag tile + identity column + big OVR readout */
+.popup-driver-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  position: relative;
+}
+.popup-driver-flag {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--r-md);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.popup-driver-flag .fi {
+  width: 2.2em;
+  height: 1.6em;
+  border-radius: var(--r-sm);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.popup-driver-identity {
+  flex: 1;
+  min-width: 0;
+}
+.popup-driver-meta-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.popup-driver-archetype {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-on-dark-muted);
+}
+.popup-driver-name {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.015em;
+  margin: 0;
+  line-height: 1.05;
+  color: white;
+}
+.popup-driver-meta-bottom {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-on-dark-muted);
+  margin-top: var(--sp-2);
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.popup-driver-ovr {
+  flex-shrink: 0;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.06);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.popup-driver-ovr-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-on-dark-muted);
+}
+.popup-driver-ovr-value {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 36px;
+  line-height: 1;
+  margin-top: 2px;
+  color: white;
+}
+
+/* Status pills used in popup hero (e.g., "Retired", "Final season") */
+.popup-status-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+}
+.popup-status-retired {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+.popup-status-retiring {
+  background: #F59E0B;
+  color: #78350F;
+}
+
+/* Team hero: logo + identity */
+.popup-team-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  position: relative;
+}
+.popup-team-identity { flex: 1; }
+.popup-team-meta-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.popup-team-shortname {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-on-dark-muted);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+}
+.popup-team-tier {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-on-dark-muted);
+}
+.popup-team-name {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.015em;
+  margin: 0;
+  line-height: 1.05;
+}
+.popup-team-meta-bottom {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-on-dark-muted);
+  margin-top: var(--sp-2);
+}
+
+/* Director hero: same shape as driver hero but no OVR block */
+.popup-director-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  position: relative;
+}
+.popup-director-identity {
+  flex: 1;
+}
+
+/* Popup body */
+.popup-body {
+  padding: var(--sp-5) var(--sp-6);
+}
 .popup-body h3 {
   margin-top: var(--sp-5);
-  margin-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
+  font-weight: 700;
 }
 .popup-body h3:first-child { margin-top: 0; }
-button.close-btn {
-  background: transparent;
-  border: none;
-  font-size: 20px;
-  color: var(--text-muted);
-  padding: 4px 10px;
-}
-button.close-btn:hover { color: var(--text-primary); background: var(--bg-subtle); }
 
-.popup-meta { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
-.popup-meta > div { margin: 2px 0; }
-
-.skills-row, .stats-row {
-  display: flex; gap: var(--sp-2);
-  flex-wrap: wrap; margin: var(--sp-2) 0;
+/* Skill bar grid (used in driver popup current skills) */
+.skill-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
 }
-.skills-row span, .stats-row span {
+.skill-bar {
   background: var(--bg-subtle);
-  padding: 6px 12px;
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+}
+.skill-bar-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.skill-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.skill-bar-number {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 18px;
+  color: var(--text-primary);
+  min-width: 28px;
+  font-variant-numeric: tabular-nums;
+}
+.skill-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.skill-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--f1-dark) 100%);
+  border-radius: var(--r-pill);
+  transition: width var(--t-slow) var(--ease);
+}
+
+/* Stat tile grid (career totals) */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--sp-2);
+}
+.stat-tile {
+  background: var(--bg-subtle);
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  text-align: center;
+}
+.stat-tile-value {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 22px;
+  color: var(--text-primary);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stat-tile-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.stat-tile-gold {
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border: 1px solid #FCD34D;
+}
+.stat-tile-gold .stat-tile-value { color: #78350F; }
+.stat-tile-gold .stat-tile-label { color: #92400E; }
+
+/* Car stat grid (used in team and director popups) */
+.car-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--sp-2);
+}
+.car-stat-grid-2col {
+  grid-template-columns: 1fr 1fr;
+}
+.car-stat-large {
+  padding: var(--sp-4);
+}
+.car-stat-large .car-stat-label { font-size: 10px; }
+.car-stat-large .car-stat-value { font-size: 26px; margin-top: 4px; }
+
+/* Director pull factor row */
+.director-pull-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--bg-subtle);
   border-radius: var(--r-sm);
   font-size: 12px;
-  color: var(--text-secondary);
 }
-.skills-row strong, .stats-row strong { color: var(--text-primary); }
+.director-pull-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.director-pull-value {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 18px;
+  color: var(--text-primary);
+}
 
+/* History tables in popups */
 .history-table { margin-top: var(--sp-2); }
+.history-table th.num,
+.history-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.history-row-champ {
+  background: rgba(245, 158, 11, 0.06) !important;
+}
+.history-row-champ td:first-child {
+  box-shadow: inset 3px 0 0 #F59E0B;
+}
+.trophy {
+  font-size: 14px;
+  margin-right: 2px;
+}
+
+/* ============================================================================ */
+
 
 /* ============================================================================
    PILOTS TAB
@@ -2195,13 +2516,114 @@ button.universe-delete-link:hover {
   accent-color: var(--f1-red);
 }
 
-/* Filter button row (history) */
+/* ============================================================================
+   HISTORY TAB
+   ============================================================================ */
+
 .filter-row {
-  display: flex; gap: var(--sp-2); align-items: center;
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
   margin-bottom: var(--sp-4);
-  font-size: 12px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  flex-wrap: wrap;
 }
-.filter-row button { padding: 4px 10px; font-size: 11px; }
+.filter-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+.filter-divider {
+  display: inline-block;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 var(--sp-1);
+}
+.filter-chip-group {
+  display: inline-flex;
+  background: var(--bg-subtle);
+  border-radius: var(--r-md);
+  padding: 2px;
+  gap: 1px;
+}
+.filter-chip {
+  background: transparent;
+  border: none;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  transition: all var(--t-base) var(--ease);
+}
+.filter-chip:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.6);
+}
+.filter-chip.active {
+  background: white;
+  color: var(--f1-red);
+  box-shadow: var(--shadow-sm);
+}
+
+/* History list tables — tighter than data-table default */
+.history-list-table th,
+.history-list-table td {
+  padding: 10px var(--sp-2);
+  font-size: 12px;
+}
+.history-list-table th.num,
+.history-list-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.history-list-table tbody tr td:first-child {
+  box-shadow: inset 0 0 0 transparent;
+  transition: box-shadow var(--t-base) var(--ease);
+}
+.history-list-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--f1-red);
+}
+
+/* Status pill — green Active / gray Retired */
+.status-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+}
+.status-pill-active {
+  background: rgba(0, 168, 90, 0.12);
+  color: #16A34A;
+}
+.status-pill-retired {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+/* Championship count: gold badge in history tables */
+.champ-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
+  background: linear-gradient(135deg, #FFD057 0%, #F59E0B 100%);
+  color: #78350F;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 12px;
+  border-radius: var(--r-sm);
+  box-shadow: 0 1px 2px rgba(245, 158, 11, 0.25);
+}
+
+/* ============================================================================ */
+
