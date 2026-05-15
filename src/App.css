@@ -496,20 +496,220 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
   border-left: 3px solid var(--f1-red);
 }
 
-/* WC header row (page-specific but high impact, leave here for now) */
-.wc-header {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: var(--sp-4);
-}
-.wc-header h2 { margin: 0; }
+/* ============================================================================
+   WORLD CHAMPIONSHIP TAB
+   ============================================================================ */
 
-/* Standings layout */
+/* Sticky action bar at the top of the WC tab — always shows the next race
+   (or end-of-season prompt) with the primary CTA. Stays in view across
+   sub-tab switches and remains pinned when scrolling. */
+.race-action-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  margin: calc(var(--sp-6) * -1) calc(var(--sp-6) * -1) var(--sp-5);
+  background: linear-gradient(135deg, var(--f1-dark) 0%, var(--f1-dark-2) 100%);
+  color: white;
+  border-top-left-radius: var(--r-md);
+  border-top-right-radius: var(--r-md);
+  border-bottom: 3px solid var(--f1-red);
+  /* Diagonal stripe overlay matching the header for cohesion */
+  background-image:
+    linear-gradient(110deg,
+      transparent 0%, transparent 49.5%,
+      rgba(255,255,255,0.025) 49.5%, rgba(255,255,255,0.025) 50%,
+      transparent 50%, transparent 100%),
+    linear-gradient(135deg, var(--f1-dark) 0%, var(--f1-dark-2) 100%);
+  background-size: 22px 100%, 100% 100%;
+  flex-wrap: wrap;
+}
+.race-action-bar.preseason-bar {
+  border-bottom-color: #FFD057;
+}
+.race-action-info { flex: 1; min-width: 200px; }
+.race-action-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--f1-red);
+  font-weight: 700;
+}
+.preseason-bar .race-action-label { color: #FFD057; }
+.race-action-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.005em;
+  margin-top: 2px;
+  display: flex; align-items: baseline; gap: var(--sp-3);
+}
+.race-action-country {
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-on-dark-muted);
+}
+.race-action-meta {
+  margin-top: var(--sp-1);
+  font-size: 12px;
+  color: var(--text-on-dark-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex; gap: var(--sp-2);
+}
+.race-action-bar button.primary {
+  background: var(--f1-red);
+  border-color: var(--f1-red);
+  font-size: 14px;
+  padding: 12px 28px;
+}
+.race-action-bar button.primary:hover {
+  background: white;
+  color: var(--f1-red);
+  border-color: white;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+}
+
+/* Calendar table — same structure, polished styling */
+.calendar-table th.col-round,
+.calendar-table td.col-round {
+  width: 48px;
+  text-align: center;
+}
+.calendar-table th.col-country,
+.calendar-table td.col-country {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.calendar-table .round-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+.calendar-table .cell-circuit {
+  font-weight: 600;
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+.calendar-table .circuit-name { font-size: 14px; }
+.calendar-table .next-pill {
+  background: var(--f1-red);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+/* Current row: left red bar + subtle red tint */
+.calendar-table tr.row-current {
+  background: rgba(225, 6, 0, 0.03);
+  box-shadow: inset 3px 0 0 var(--f1-red);
+}
+.calendar-table tr.row-current .round-badge {
+  background: var(--f1-red);
+  color: white;
+  border-color: var(--f1-red);
+}
+.calendar-table tr.row-current:hover {
+  background: rgba(225, 6, 0, 0.06);
+}
+.calendar-table tr.row-past .round-badge {
+  background: var(--bg-page);
+  color: var(--text-muted);
+}
+.calendar-table tr.row-future {
+  color: var(--text-secondary);
+}
+.calendar-table tr.row-future .circuit-name { color: var(--text-secondary); }
+
+/* Mini chips for circuit profile + weather columns */
+.mini-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.profile-linear    { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+.profile-mixed     { background: #DBEAFE; color: #1E40AF; border-color: #BFDBFE; }
+.profile-technical { background: #FCE7F3; color: #9F1239; border-color: #FBCFE8; }
+.profile-balanced  { background: #E0E7FF; color: #3730A3; border-color: #C7D2FE; }
+.weather-normal { background: #F0F9FF; color: #075985; border-color: #BAE6FD; }
+.weather-hot    { background: #FEE2E2; color: #991B1B; border-color: #FECACA; }
+.weather-rain   { background: #DBEAFE; color: #1E3A8A; border-color: #BFDBFE; }
+
+/* Standings layout (drivers + constructors side-by-side) */
 .standings-side-by-side {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   gap: var(--sp-6);
-  margin-top: var(--sp-5);
+  margin-top: var(--sp-3);
 }
+.standings-table th.num,
+.standings-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.standings-table .cell-driver {
+  font-weight: 500;
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+.standings-table .team-tag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Numbered position badges in standings */
+.pos-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+.pos-badge.pos-1 {
+  background: linear-gradient(135deg, #FFD057 0%, #F59E0B 100%);
+  color: #78350F; border-color: #F59E0B;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+.pos-badge.pos-2 {
+  background: linear-gradient(135deg, #E5E7EB 0%, #9CA3AF 100%);
+  color: #1F2937; border-color: #9CA3AF;
+}
+.pos-badge.pos-3 {
+  background: linear-gradient(135deg, #FCA458 0%, #C2410C 100%);
+  color: white; border-color: #C2410C;
+}
+
+/* ============================================================================ */
 
 /* Tick reveal control bar (race + qualifying) */
 .tick-controls {
@@ -667,56 +867,371 @@ button.close-btn:hover { color: var(--text-primary); background: var(--bg-subtle
 
 .history-table { margin-top: var(--sp-2); }
 
-/* ----- Home screen ----- */
-.home-screen {
-  max-width: 760px;
-  margin: 0 auto;
+/* ============================================================================
+   PILOTS TAB
+   ============================================================================ */
+
+.pilots-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
+.pilots-header h2 { margin: 0; }
+.pilots-count {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  background: var(--bg-subtle);
+  border-radius: var(--r-pill);
+}
+
+/* Tighter table layout so the OVR bar + skill columns don't get cramped */
+.pilots-table th,
+.pilots-table td {
+  padding: 8px var(--sp-2);
+  font-size: 12px;
+}
+.pilots-table th.num,
+.pilots-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle red left edge that grows on row hover, echoing the home-card hover */
+.pilots-table tbody tr {
+  position: relative;
+}
+.pilots-table tbody tr td:first-child {
+  box-shadow: inset 0 0 0 transparent;
+  transition: box-shadow var(--t-base) var(--ease);
+}
+.pilots-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--f1-red);
+}
+
+/* Driver name cell: flag + name + inline status badges */
+.cell-driver-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 500;
+}
+.driver-name-btn {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom-color: transparent;
+}
+.driver-name-btn:hover {
+  color: var(--f1-red);
+  opacity: 1;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  margin-left: 2px;
+}
+.status-retiring {
+  background: rgba(245, 166, 35, 0.12);
+  color: #B45309;
+}
+.status-injury {
+  background: rgba(225, 6, 0, 0.1);
+  color: var(--f1-red);
+}
+
+/* Team cell: small colored dot, short code, then full name in muted gray */
+.team-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.team-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08);
+}
+.team-fullname {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.free-agent {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.cell-archetype {
+  font-size: 11px;
+  text-transform: capitalize;
+  color: var(--text-secondary);
+}
+
+/* Skill columns: monospaced numbers, muted color so the OVR bar dominates */
+.skill-num {
+  color: var(--text-secondary);
+  font-weight: 500;
+  width: 38px;
+}
+
+/* OVR bar: number + horizontal track + fill, all in a flex row */
+.cell-ovr {
+  width: 140px;
+  min-width: 140px;
+}
+.ovr-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ovr-bar-number {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 22px;
+  text-align: right;
+}
+.ovr-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  position: relative;
+}
+.ovr-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--f1-dark) 100%);
+  border-radius: var(--r-pill);
+  transition: width var(--t-slow) var(--ease);
+}
+
+/* ============================================================================ */
+
+/* ============================================================================
+   HOME SCREEN
+   ============================================================================ */
+
+/* Hero panel: bold dark gradient banner with the F1 logo + tagline. Replaces
+   the standard header for the home page. */
+.home-app { max-width: 980px; }
+
+.home-hero {
+  background:
+    linear-gradient(110deg,
+      transparent 0%, transparent 49.5%,
+      rgba(255,255,255,0.025) 49.5%, rgba(255,255,255,0.025) 50%,
+      transparent 50%, transparent 100%),
+    linear-gradient(135deg, var(--f1-dark) 0%, var(--f1-dark-2) 60%, var(--f1-dark-3) 100%);
+  background-size: 22px 100%, 100% 100%;
+  color: white;
+  padding: var(--sp-10) var(--sp-8);
+  border-radius: var(--r-md);
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+.home-hero::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: var(--f1-red);
+}
+.home-hero-content {
+  display: flex; align-items: center; gap: var(--sp-6);
+}
+.home-logo {
+  background: var(--f1-red);
+  color: white;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 48px;
+  padding: 8px 18px;
+  border-radius: var(--r-sm);
+  transform: skewX(-8deg);
+  letter-spacing: -0.02em;
+  display: inline-block;
+}
+.home-title {
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1;
+}
+.home-tagline {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-on-dark-muted);
+  margin-top: var(--sp-2);
+}
+
+.home-content {
+  margin-top: var(--sp-4);
+  background: var(--bg-card);
+  padding: var(--sp-6);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.home-section-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: var(--sp-4);
+}
+.home-section-header h2 { margin: 0; }
+
+/* Empty-state block when there are no saved universes */
+.home-empty {
+  text-align: center;
+  padding: var(--sp-8) var(--sp-4);
+}
+.home-empty-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-2);
+}
+.home-empty .primary { margin-top: var(--sp-4); }
+
+/* Universe cards: clean row with a left-edge red accent that slides in on hover */
 .universe-list {
   display: flex; flex-direction: column;
   gap: var(--sp-3);
-  margin: var(--sp-5) 0;
 }
 .universe-card {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: var(--sp-4) var(--sp-5);
-  background: var(--bg-subtle);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  flex-wrap: wrap;
-  transition: border-color var(--t-base) var(--ease), transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
+  overflow: hidden;
+  position: relative;
+  transition:
+    border-color var(--t-base) var(--ease),
+    transform var(--t-base) var(--ease),
+    box-shadow var(--t-base) var(--ease);
+}
+/* The slide-in red accent on the left edge */
+.universe-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  background: var(--f1-red);
+  transition: width var(--t-base) var(--ease);
 }
 .universe-card:hover {
-  border-color: var(--f1-red);
-  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  transform: translateX(2px);
   box-shadow: var(--shadow-md);
 }
-.universe-info strong { font-size: 16px; font-family: var(--font-display); }
-.universe-info .muted { font-size: 12px; margin-top: var(--sp-1); }
-.universe-actions { display: flex; gap: var(--sp-2); }
-.delete-confirm {
-  margin-top: var(--sp-3);
-  padding: var(--sp-3);
-  background: rgba(225, 6, 0, 0.06);
-  border-radius: var(--r-sm);
-  display: flex; gap: var(--sp-2); align-items: center;
-  flex-basis: 100%;
-  font-size: 13px;
+.universe-card:hover::before { width: 4px; }
+
+.universe-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--sp-4) var(--sp-5);
+  gap: var(--sp-4);
+  flex-wrap: wrap;
 }
+
+.universe-info { flex: 1; min-width: 200px; }
+.universe-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--sp-1);
+}
+.universe-meta {
+  display: flex; gap: var(--sp-4);
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.universe-meta strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.meta-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.universe-actions {
+  display: flex; align-items: center; gap: var(--sp-4);
+}
+.universe-actions button.primary { padding: 10px 24px; }
+/* Delete is a subtle text link to avoid visual conflict with the play button */
+button.universe-delete-link {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+}
+button.universe-delete-link:hover {
+  color: var(--f1-red);
+  background: transparent;
+}
+
+.delete-confirm {
+  padding: var(--sp-3) var(--sp-5);
+  background: rgba(225, 6, 0, 0.06);
+  border-top: 1px solid rgba(225, 6, 0, 0.15);
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.delete-confirm-actions { display: flex; gap: var(--sp-2); }
+
 .create-form {
   margin-top: var(--sp-5);
   padding: var(--sp-5);
   background: var(--bg-subtle);
   border-radius: var(--r-md);
+  border: 1px solid var(--border);
+}
+.create-form h3 {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-primary);
 }
 .create-form input {
   width: 100%;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
-  font-size: 14px;
+  font-size: 15px;
   font-family: var(--font-body);
   margin: var(--sp-2) 0;
+  background: white;
   transition: border-color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
 }
 .create-form input:focus {
@@ -724,6 +1239,8 @@ button.close-btn:hover { color: var(--text-primary); background: var(--bg-subtle
   border-color: var(--f1-red);
   box-shadow: 0 0 0 3px rgba(225, 6, 0, 0.12);
 }
+
+/* ============================================================================ */
 
 /* ----- Gear menu (top right) ----- */
 .gear-menu-container { position: relative; }

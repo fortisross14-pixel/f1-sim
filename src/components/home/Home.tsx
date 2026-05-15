@@ -14,6 +14,11 @@ export interface LoadedUniverse {
 
 // Universe selection / creation / deletion screen.
 // Shown when no universe is currently loaded.
+//
+// Visual language: large F1-branded hero panel at the top, universe cards
+// rendered as horizontal rows with a left-edge red accent that slides in on
+// hover. Delete confirmation expands inline beneath the card without taking
+// the user away from the list.
 export function Home({ onLoad }: { onLoad: (u: LoadedUniverse) => void }) {
   const [universes, setUniverses] = useState<UniverseMeta[]>(() => listUniverses());
   const [showCreate, setShowCreate] = useState<boolean>(false);
@@ -43,36 +48,66 @@ export function Home({ onLoad }: { onLoad: (u: LoadedUniverse) => void }) {
   };
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1><span>F1 Sim</span></h1>
-        <div className="header-info"><span>Universe selection</span></div>
-      </header>
+    <div className="app home-app">
+      {/* Hero panel — replaces the standard header for the home page */}
+      <div className="home-hero">
+        <div className="home-hero-content">
+          <div className="home-logo">F1</div>
+          <div>
+            <h1 className="home-title">SIM</h1>
+            <div className="home-tagline">Career Mode Simulator</div>
+          </div>
+        </div>
+      </div>
+
       <main>
-        <div className="screen home-screen">
-          <h2>Choose a universe</h2>
+        <div className="home-content">
+          <div className="home-section-header">
+            <h2>Select a universe</h2>
+            {!showCreate && universes.length > 0 && (
+              <button className="primary" onClick={() => setShowCreate(true)}>
+                + New Universe
+              </button>
+            )}
+          </div>
+
           {universes.length === 0 && !showCreate && (
-            <p className="muted">No universes saved yet. Create one to start.</p>
+            <div className="home-empty">
+              <p className="home-empty-title">No universes yet</p>
+              <p className="muted">Create your first universe to start the championship.</p>
+              <button className="primary big" onClick={() => setShowCreate(true)}>
+                + New Universe
+              </button>
+            </div>
           )}
+
           {universes.length > 0 && (
             <div className="universe-list">
               {universes.map(u => (
                 <div key={u.id} className="universe-card">
-                  <div className="universe-info">
-                    <strong>{u.name}</strong>
-                    <div className="muted">
-                      Year {u.year} · Round {u.currentRound} · Last played {formatRelativeTime(u.lastPlayed)}
+                  <div className="universe-card-row">
+                    <div className="universe-info">
+                      <div className="universe-name">{u.name}</div>
+                      <div className="universe-meta">
+                        <span><span className="meta-label">Year</span> <strong>{u.year}</strong></span>
+                        <span><span className="meta-label">Round</span> <strong>{u.currentRound}</strong></span>
+                        <span><span className="meta-label">Last played</span> <strong>{formatRelativeTime(u.lastPlayed)}</strong></span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="universe-actions">
-                    <button className="primary" onClick={() => load(u)}>Load</button>
-                    <button className="danger" onClick={() => setConfirmDelete(u.id)}>Delete</button>
+                    <div className="universe-actions">
+                      <button className="primary" onClick={() => load(u)}>Play →</button>
+                      <button className="universe-delete-link" onClick={() => setConfirmDelete(u.id)}>
+                        Delete
+                      </button>
+                    </div>
                   </div>
                   {confirmDelete === u.id && (
                     <div className="delete-confirm">
-                      Delete "{u.name}" permanently?
-                      <button className="danger" onClick={() => doDelete(u.id)}>Yes, delete</button>
-                      <button onClick={() => setConfirmDelete(null)}>Cancel</button>
+                      <span>Permanently delete <strong>"{u.name}"</strong>?</span>
+                      <div className="delete-confirm-actions">
+                        <button onClick={() => setConfirmDelete(null)}>Cancel</button>
+                        <button className="danger" onClick={() => doDelete(u.id)}>Yes, delete</button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -80,7 +115,7 @@ export function Home({ onLoad }: { onLoad: (u: LoadedUniverse) => void }) {
             </div>
           )}
 
-          {showCreate ? (
+          {showCreate && (
             <div className="create-form">
               <h3>New universe</h3>
               <input
@@ -95,10 +130,6 @@ export function Home({ onLoad }: { onLoad: (u: LoadedUniverse) => void }) {
                 <button onClick={() => { setShowCreate(false); setNewName(''); }}>Cancel</button>
                 <button className="primary big" onClick={create}>Create &amp; play →</button>
               </div>
-            </div>
-          ) : (
-            <div className="actions" style={{ marginTop: 20 }}>
-              <button className="primary big" onClick={() => setShowCreate(true)}>+ New Universe</button>
             </div>
           )}
         </div>
