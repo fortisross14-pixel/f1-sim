@@ -6,6 +6,7 @@ import { DriverDetailPopup } from '../popups/DriverDetailPopup';
 import { TeamDetailPopup } from '../popups/TeamDetailPopup';
 import { DriverLink } from '../common/DriverLink';
 import { Flag } from '../common/Flag';
+import { TeamLogo } from '../common/TeamLogo';
 import { allDriversMap, teamByDriverMap } from '../common/helpers';
 
 // ============================================================================
@@ -251,9 +252,12 @@ function StandingsView() {
                   <tr key={s.teamId}>
                     <td><PositionBadge pos={i + 1} color={t.color} /></td>
                     <td>
-                      <button className="link-btn" style={{ color: t.color, fontWeight: 600 }} onClick={() => setPopupTeam(t)}>
-                        {t.name}
-                      </button>
+                      <span className="constructor-cell">
+                        <TeamLogo team={t} size={24} />
+                        <button className="link-btn" style={{ color: t.color, fontWeight: 600 }} onClick={() => setPopupTeam(t)}>
+                          {t.name}
+                        </button>
+                      </span>
                     </td>
                     <td className="num"><strong>{s.points}</strong></td>
                     <td className="num">{t.seasonWins}</td>

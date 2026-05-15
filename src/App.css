@@ -777,25 +777,270 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
 }
 .move-card strong { display: block; margin-bottom: var(--sp-1); }
 
+/* ============================================================================
+   TEAMS TAB
+   ============================================================================ */
+
 .teams-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: var(--sp-4);
+}
+
+.team-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  position: relative;
+  transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
+}
+.team-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Header row: logo + name on the left, position + points on the right */
+.team-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: var(--sp-3);
 }
-.team-card {
+.team-card-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+}
+.team-card-name {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  border-bottom-color: transparent;
+}
+.team-card-name:hover { opacity: 1; }
+.team-card-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Logo tile (used on team cards + standings + popups) */
+.team-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Right side of card header: position badge + season points */
+.team-card-standing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.team-pos-badge {
+  display: inline-flex;
+  align-items: baseline;
   background: var(--bg-subtle);
-  padding: var(--sp-3);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 18px;
+  padding: 4px 12px;
   border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  line-height: 1;
+}
+.team-pos-prefix {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.6;
+  margin-right: 1px;
+}
+.team-pos-tbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.team-pos-1 {
+  background: linear-gradient(135deg, #FFD057 0%, #F59E0B 100%);
+  color: #78350F;
+  border-color: #F59E0B;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25);
+}
+.team-pos-2 {
+  background: linear-gradient(135deg, #E5E7EB 0%, #9CA3AF 100%);
+  color: #1F2937;
+  border-color: #9CA3AF;
+}
+.team-pos-3 {
+  background: linear-gradient(135deg, #FCA458 0%, #C2410C 100%);
+  color: white;
+  border-color: #C2410C;
+}
+
+.team-card-points {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.team-card-points strong {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.team-card-points-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+/* Card body sections — Car, Budget, Lineup, Direction */
+.team-card-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.team-card-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+/* Car stat row */
+.car-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-2);
+}
+.car-stat {
+  background: var(--bg-subtle);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2);
+  text-align: center;
+}
+.car-stat-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+.car-stat-value {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 18px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+/* Budget row: cap / car / unused */
+.team-card-budget {
+  display: flex;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-subtle);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+}
+.budget-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+.budget-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.budget-item strong {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.budget-unused {
+  color: var(--f1-red);
+}
+
+/* Roster lines (driver and director) */
+.driver-line {
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
   font-size: 13px;
 }
-.team-card h3 { margin: 0 0 var(--sp-2); font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--text-primary); }
-.team-card .row {
-  display: flex; gap: var(--sp-3); margin-bottom: var(--sp-1);
-  color: var(--text-secondary); font-size: 12px;
+.driver-line-empty { opacity: 0.5; }
+.driver-label,
+.director-label {
+  display: inline-block;
+  min-width: 32px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-family: var(--font-display);
 }
-.team-card .roster { margin-top: var(--sp-2); }
-.driver-line { padding: var(--sp-1) 0; }
-.director-line { padding: var(--sp-1) 0; color: var(--text-secondary); font-size: 12px; }
+.driver-line-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom-color: transparent;
+}
+.driver-line-name:hover { color: var(--f1-red); opacity: 1; }
+.director-line {
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+}
+.director-line .link-btn {
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom-color: transparent;
+}
+.director-line .link-btn:hover { color: var(--f1-red); opacity: 1; }
+
+/* Constructor standings inline cell (team logo + name) */
+.constructor-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ============================================================================ */
+
 
 /* ----- Popup / modal ----- */
 .popup-overlay {
