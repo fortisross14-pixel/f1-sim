@@ -6,6 +6,7 @@ import {
 } from './types';
 import { RNG, clamp, makeId } from './rng';
 import { FIRST_NAMES, LAST_NAMES, TEAM_DATA, CALENDAR_CIRCUITS } from './data';
+import { COUNTRIES, CountryEntry, rollCountry, rollNameForCountry } from './countries';
 
 // ============================================================================
 // SKILL RANGES BY RARITY
@@ -54,6 +55,24 @@ const RACE_DIR_RELIABILITY: Record<Rarity, [number, number]> = {
 // NAME GENERATION (avoiding collisions within a session)
 // ============================================================================
 const usedNames = new Set<string>();
+
+// Country-aware name generator: picks a name from the country's pools.
+// Falls back to the legacy generic pools if for some reason a country is missing.
+function makeNameForCountry(rng: RNG, country: CountryEntry): string {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const name = rollNameForCountry(country, rng);
+    if (!usedNames.has(name)) {
+      usedNames.add(name);
+      return name;
+    }
+  }
+  // Final fallback: append a number to keep it unique.
+  const name = `${rng.pick(country.firstNames)} ${rng.pick(country.surnames)} ${rng.int(2, 99)}`;
+  usedNames.add(name);
+  return name;
+}
+
+// Legacy generic name generator (kept for any callers we don't update).
 function makeName(rng: RNG): string {
   for (let attempt = 0; attempt < 20; attempt++) {
     const f = rng.pick(FIRST_NAMES);
@@ -107,9 +126,13 @@ export function createDriver(rng: RNG, rarity: Rarity, age?: number): Driver {
   const potential = rollDriverSkills(rng, rarity, archetype);
   const startAge = 23;
   const retirementAge = rng.int(32, 39);
+  const country = rollCountry(rng);
   return {
     id: makeId('drv'),
-    name: makeName(rng),
+    name: makeNameForCountry(rng, country),
+    country: country.name,
+    countryCode: country.code,
+    flag: country.flag,
     rarity,
     archetype,
     potentialSkills: potential,
@@ -148,6 +171,13 @@ export function effectiveDriverSkills(d: Driver): DriverSkills {
   };
 }
 
+// Overall rating: weighted blend of the 4 skills. Driving and Speed contribute the
+// most since they drive race pace; physical and car setup are supporting traits.
+export function driverOverall(d: Driver): number {
+  const s = effectiveDriverSkills(d);
+  return Math.round(s.driving * 0.35 + s.speed * 0.30 + s.carSetup * 0.20 + s.physical * 0.15);
+}
+
 export function careerStageOf(d: Driver): 'rookie' | 'prime' | 'veteran' {
   const yearsIn = d.age - d.careerStartAge;
   if (yearsIn <= 1) return 'rookie';
@@ -161,9 +191,13 @@ export function careerStageOf(d: Driver): 'rookie' | 'prime' | 'veteran' {
 
 export function createEngineeringDirector(rng: RNG, rarity: Rarity): EngineeringDirector {
   const ranges = ENG_TARGET_RANGE[rarity];
+  const country = rollCountry(rng);
   return {
     id: makeId('eng'),
-    name: makeName(rng),
+    name: makeNameForCountry(rng, country),
+    country: country.name,
+    countryCode: country.code,
+    flag: country.flag,
     rarity,
     speedTarget:       rng.int(ranges.speed[0], ranges.speed[1]),
     accelTarget:       rng.int(ranges.others[0], ranges.others[1]),
@@ -180,9 +214,13 @@ export function createEngineeringDirector(rng: RNG, rarity: Rarity): Engineering
 export function createRaceDirector(rng: RNG, rarity: Rarity): RaceDirector {
   const [tLo, tHi] = RACE_DIR_TIME_PCT_RANGE[rarity];
   const [rLo, rHi] = RACE_DIR_RELIABILITY[rarity];
+  const country = rollCountry(rng);
   return {
     id: makeId('rdr'),
-    name: makeName(rng),
+    name: makeNameForCountry(rng, country),
+    country: country.name,
+    countryCode: country.code,
+    flag: country.flag,
     rarity,
     reliabilityBonus: rng.int(rLo, rHi),
     timeImprovementPct: parseFloat(rng.range(tLo, tHi).toFixed(2)),

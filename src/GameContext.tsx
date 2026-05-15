@@ -8,34 +8,58 @@ import {
 } from './sim/season';
 import { simulateQualifying, simulateRace } from './sim/race';
 import { RNG } from './sim/rng';
+import { saveUniverse } from './save';
 
 interface GameContextValue {
   state: SeasonState;
-  // race weekend flow — split into Q1, Q2, and Race so user clicks through each
-  startRaceWeekend: () => void;        // enter pre_race phase from menu
-  runQualifying: () => QualifyingResult; // runs full Q (Q1+Q2), splits ticks for UI to step through
-  advanceToQ2: () => void;              // transition from showing Q1 to showing Q2 ticks
+  universeId: string;
+  universeName: string;
+  // race weekend flow
+  startRaceWeekend: () => void;
+  runQualifying: () => QualifyingResult;
+  advanceToQ2: () => void;
   startRace: () => RaceResult;
-  finishCurrentRace: () => void;       // commits race result, advances round, returns to menu (or preseason if last race)
+  finishCurrentRace: () => void;
   // season flow
-  advanceSeason: () => PreseasonData;   // end-of-year transition: archive, market, new cars
-  startNewYear: () => void;             // commits the new year, returns to menu
-  returnToMenu: () => void;             // exit a race weekend mid-flow (cancel)
+  advanceSeason: () => PreseasonData;
+  startNewYear: () => void;
+  returnToMenu: () => void;
   // utility
-  resetGame: (seed?: number) => void;
+  saveNow: () => void;          // manual save (gear menu)
+  exitToHome: () => void;        // signals shell to return home
 }
 
 const GameContext = createContext<GameContextValue | null>(null);
 
-export function GameProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<SeasonState>(() => createNewSeason());
+export function GameProvider({
+  children, initialState, universeId, universeName, onExit,
+}: {
+  children: ReactNode;
+  initialState: SeasonState;
+  universeId: string;
+  universeName: string;
+  onExit: () => void;
+}) {
+  const [state, setState] = useState<SeasonState>(initialState);
+
+  // Helper to commit state and autosave together.
+  const commit = useCallback((newState: SeasonState, autosave: boolean) => {
+    setState(newState);
+    if (autosave) {
+      try {
+        saveUniverse(universeId, universeName, newState);
+      } catch (err) {
+        console.warn('Autosave failed', err);
+      }
+    }
+  }, [universeId, universeName]);
 
   const startRaceWeekend = useCallback(() => {
     state.phase = 'pre_race';
     state.lastQualiResult = undefined;
     state.lastRaceResult = undefined;
-    setState({ ...state });
-  }, [state]);
+    commit({ ...state }, false);
+  }, [state, commit]);
 
   const runQualifying = useCallback((): QualifyingResult => {
     const rng = new RNG();
@@ -46,13 +70,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
     applyQualiResult(state, result.poleDriverId);
     state.lastQualiResult = result;
-    // The UI's tick reveal will step through Q1 ticks first, then user clicks "Run Q2",
-    // then Q2 ticks reveal. We don't split simulation — both runs in one go — but the
-    // UI gates the Q2 reveal behind a button. Internally the result has all 6 ticks.
     state.phase = 'qualifying_q1';
-    setState({ ...state });
+    commit({ ...state }, false);
     return result;
-  }, [state]);
+  }, [state, commit]);
+
+  const advanceToQ2 = useCallback(() => {
+    state.phase = 'qualifying_q2';
+    commit({ ...state }, false);
+  }, [state, commit]);
 
   const startRace = useCallback((): RaceResult => {
     const rng = new RNG();
@@ -64,14 +90,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
     state.lastRaceResult = result;
     state.phase = 'race_results';
-    setState({ ...state });
+    commit({ ...state }, false);
     return result;
-  }, [state]);
-
-  const advanceToQ2 = useCallback(() => {
-    state.phase = 'qualifying_q2';
-    setState({ ...state });
-  }, [state]);
+  }, [state, commit]);
 
   const finishCurrentRace = useCallback(() => {
     if (!state.lastRaceResult || !state.lastQualiResult) return;
@@ -85,42 +106,58 @@ export function GameProvider({ children }: { children: ReactNode }) {
       state.phase = 'menu';
       state.lastQualiResult = undefined;
       state.lastRaceResult = undefined;
-      setState({ ...state });
+      commit({ ...state }, true); // AUTOSAVE on race finish
     } else {
       // Last race of season — auto-trigger season advance
       const rng = new RNG();
       advanceToNewSeason(state, rng);
-      setState({ ...state });
+      commit({ ...state }, true); // AUTOSAVE on season advance
     }
-  }, [state]);
+  }, [state, commit]);
 
   const advanceSeason = useCallback((): PreseasonData => {
     const rng = new RNG();
     const result = advanceToNewSeason(state, rng);
-    setState({ ...state });
+    commit({ ...state }, true); // AUTOSAVE
     return result;
-  }, [state]);
+  }, [state, commit]);
 
   const startNewYear = useCallback(() => {
     state.phase = 'menu';
-    setState({ ...state });
-  }, [state]);
+    commit({ ...state }, true); // AUTOSAVE on year commit
+  }, [state, commit]);
 
   const returnToMenu = useCallback(() => {
     state.phase = 'menu';
     state.lastQualiResult = undefined;
     state.lastRaceResult = undefined;
-    setState({ ...state });
-  }, [state]);
+    commit({ ...state }, false);
+  }, [state, commit]);
 
-  const resetGame = useCallback((seed?: number) => {
-    setState(createNewSeason(seed));
-  }, []);
+  const saveNow = useCallback(() => {
+    try {
+      saveUniverse(universeId, universeName, state);
+    } catch (err) {
+      console.warn('Manual save failed', err);
+    }
+  }, [state, universeId, universeName]);
+
+  const exitToHome = useCallback(() => {
+    // Save first, then signal exit
+    try {
+      saveUniverse(universeId, universeName, state);
+    } catch (err) {
+      console.warn('Exit save failed', err);
+    }
+    onExit();
+  }, [state, universeId, universeName, onExit]);
 
   return (
     <GameContext.Provider value={{
-      state, startRaceWeekend, runQualifying, advanceToQ2, startRace, finishCurrentRace,
-      advanceSeason, startNewYear, returnToMenu, resetGame,
+      state, universeId, universeName,
+      startRaceWeekend, runQualifying, advanceToQ2, startRace, finishCurrentRace,
+      advanceSeason, startNewYear, returnToMenu,
+      saveNow, exitToHome,
     }}>
       {children}
     </GameContext.Provider>
@@ -132,3 +169,6 @@ export function useGame(): GameContextValue {
   if (!ctx) throw new Error('useGame must be used inside GameProvider');
   return ctx;
 }
+
+// Helper for the bootstrap layer to create a fresh universe state.
+export { createNewSeason };

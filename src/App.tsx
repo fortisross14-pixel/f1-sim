@@ -1,23 +1,155 @@
 import { useState, useEffect, useMemo } from 'react';
-import { GameProvider, useGame } from './GameContext';
+import { GameProvider, useGame, createNewSeason } from './GameContext';
+import { AudioProvider, useAudio } from './audio';
+import {
+  listUniverses, loadUniverse, deleteUniverse, saveUniverse,
+  generateUniverseId, UniverseMeta,
+} from './save';
 import {
   Driver, Team, EngineeringDirector, RaceDirector,
   PreseasonData, Rarity, DriverYearRecord, DirectorYearRecord, TeamYearRecord,
+  SeasonState,
 } from './sim/types';
-import { effectiveDriverSkills } from './sim/generators';
+import { effectiveDriverSkills, driverOverall } from './sim/generators';
 import { remainingPoints, carPointCost } from './sim/market';
 
 import './App.css';
 
 // ============================================================================
-// TOP-LEVEL APP
+// TOP-LEVEL APP — Home screen OR an in-game universe.
 // ============================================================================
+interface LoadedUniverse {
+  id: string;
+  name: string;
+  state: SeasonState;
+}
+
 export default function App() {
+  // null = on Home screen; otherwise we have a universe loaded.
+  const [loaded, setLoaded] = useState<LoadedUniverse | null>(null);
+
   return (
-    <GameProvider>
-      <Shell />
-    </GameProvider>
+    <AudioProvider>
+      {loaded === null ? (
+        <Home onLoad={setLoaded} />
+      ) : (
+        <GameProvider
+          initialState={loaded.state}
+          universeId={loaded.id}
+          universeName={loaded.name}
+          onExit={() => setLoaded(null)}
+        >
+          <Shell />
+        </GameProvider>
+      )}
+    </AudioProvider>
   );
+}
+
+// ============================================================================
+// HOME SCREEN
+// ============================================================================
+function Home({ onLoad }: { onLoad: (u: LoadedUniverse) => void }) {
+  const [universes, setUniverses] = useState<UniverseMeta[]>(() => listUniverses());
+  const [showCreate, setShowCreate] = useState<boolean>(false);
+  const [newName, setNewName] = useState<string>('');
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const refresh = () => setUniverses(listUniverses());
+
+  const create = () => {
+    const trimmed = newName.trim() || `Universe ${universes.length + 1}`;
+    const id = generateUniverseId();
+    const state = createNewSeason();
+    saveUniverse(id, trimmed, state);
+    onLoad({ id, name: trimmed, state });
+  };
+
+  const load = (meta: UniverseMeta) => {
+    const state = loadUniverse(meta.id);
+    if (state) onLoad({ id: meta.id, name: meta.name, state });
+    else alert(`Couldn't load "${meta.name}" — the save data may be corrupted.`);
+  };
+
+  const doDelete = (id: string) => {
+    deleteUniverse(id);
+    setConfirmDelete(null);
+    refresh();
+  };
+
+  return (
+    <div className="app">
+      <header className="header">
+        <h1>F1 Sim</h1>
+        <div className="header-info"><span>Universe selection</span></div>
+      </header>
+      <main>
+        <div className="screen home-screen">
+          <h2>Choose a universe</h2>
+          {universes.length === 0 && !showCreate && (
+            <p className="muted">No universes saved yet. Create one to start.</p>
+          )}
+          {universes.length > 0 && (
+            <div className="universe-list">
+              {universes.map(u => (
+                <div key={u.id} className="universe-card">
+                  <div className="universe-info">
+                    <strong>{u.name}</strong>
+                    <div className="muted">Year {u.year} · Round {u.currentRound} · Last played {formatRelativeTime(u.lastPlayed)}</div>
+                  </div>
+                  <div className="universe-actions">
+                    <button className="primary" onClick={() => load(u)}>Load</button>
+                    <button className="danger" onClick={() => setConfirmDelete(u.id)}>Delete</button>
+                  </div>
+                  {confirmDelete === u.id && (
+                    <div className="delete-confirm">
+                      Delete "{u.name}" permanently?
+                      <button className="danger" onClick={() => doDelete(u.id)}>Yes, delete</button>
+                      <button onClick={() => setConfirmDelete(null)}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showCreate ? (
+            <div className="create-form">
+              <h3>New universe</h3>
+              <input
+                type="text"
+                placeholder="Universe name (e.g., Universe Alpha)"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') create(); }}
+                autoFocus
+              />
+              <div className="actions">
+                <button onClick={() => { setShowCreate(false); setNewName(''); }}>Cancel</button>
+                <button className="primary big" onClick={create}>Create &amp; play →</button>
+              </div>
+            </div>
+          ) : (
+            <div className="actions" style={{ marginTop: 20 }}>
+              <button className="primary big" onClick={() => setShowCreate(true)}>+ New Universe</button>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function formatRelativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(ms).toLocaleDateString();
 }
 
 function Shell() {
@@ -37,16 +169,17 @@ function Shell() {
 type TopTab = 'wc' | 'pilots' | 'teams' | 'history';
 
 function Menu() {
-  const { state } = useGame();
+  const { state, universeName } = useGame();
   const [tab, setTab] = useState<TopTab>('wc');
 
   return (
     <div className="app">
       <header className="header">
-        <h1>F1 Sim</h1>
+        <h1>F1 Sim <span className="universe-label">— {universeName}</span></h1>
         <div className="header-info">
           <span>Year {state.year}</span>
           <span>Round {state.currentRound} / {state.calendar.length}</span>
+          <GearMenu />
         </div>
       </header>
       <nav className="top-tabs">
@@ -61,6 +194,62 @@ function Menu() {
         {tab === 'teams' && <TeamsTab />}
         {tab === 'history' && <HistoryTab />}
       </main>
+    </div>
+  );
+}
+
+// ============================================================================
+// GEAR MENU — top-right dropdown for Save / Audio / Exit
+// ============================================================================
+function GearMenu() {
+  const { saveNow, exitToHome } = useGame();
+  const { enabled, volume, setEnabled, setVolume, play } = useAudio();
+  const [open, setOpen] = useState<boolean>(false);
+  const [savedFlash, setSavedFlash] = useState<boolean>(false);
+
+  // Close when clicking elsewhere
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement);
+      if (!el.closest('.gear-menu-container')) setOpen(false);
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [open]);
+
+  const handleSave = () => {
+    saveNow();
+    setSavedFlash(true);
+    play('click');
+    setTimeout(() => setSavedFlash(false), 1500);
+  };
+
+  return (
+    <div className="gear-menu-container">
+      <button className="gear-btn" onClick={() => setOpen(o => !o)} title="Menu">⚙</button>
+      {open && (
+        <div className="gear-menu">
+          <button onClick={handleSave}>
+            {savedFlash ? '✓ Saved!' : '💾 Save now'}
+          </button>
+          <div className="gear-audio">
+            <label>
+              <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+              {' '}🔊 Audio
+            </label>
+            {enabled && (
+              <input
+                type="range"
+                min={0} max={1} step={0.05}
+                value={volume}
+                onChange={e => setVolume(parseFloat(e.target.value))}
+              />
+            )}
+          </div>
+          <button onClick={exitToHome}>🏠 Back to Home</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -220,6 +409,8 @@ function WCPreseasonView({ data }: { data: PreseasonData }) {
 }
 
 function PreseasonSummary({ data }: { data: PreseasonData }) {
+  const audio = useAudio();
+  useEffect(() => { audio.play('champion'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <div className="awards">
@@ -332,11 +523,11 @@ function Delta({ before, after }: { before: number; after: number }) {
 // ============================================================================
 // PILOTS TAB
 // ============================================================================
-type DriverSortKey = 'name' | 'team' | 'age' | 'rarity' | 'driving' | 'physical' | 'carSetup' | 'speed' | 'years';
+type DriverSortKey = 'name' | 'team' | 'age' | 'rarity' | 'driving' | 'physical' | 'carSetup' | 'speed' | 'overall' | 'years';
 
 function PilotsTab() {
   const { state } = useGame();
-  const [sortKey, setSortKey] = useState<DriverSortKey>('rarity');
+  const [sortKey, setSortKey] = useState<DriverSortKey>('overall');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [popupDriver, setPopupDriver] = useState<Driver | null>(null);
 
@@ -350,31 +541,36 @@ function PilotsTab() {
         <thead>
           <tr>
             <SortHeader label="Name" k="name" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <th>Country</th>
             <SortHeader label="Team" k="team" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
-            <SortHeader label="Yrs Active" k="years" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Yrs" k="years" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
             <SortHeader label="Age" k="age" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
             <SortHeader label="Rarity" k="rarity" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
             <th>Archetype</th>
-            <SortHeader label="D" k="driving" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
-            <SortHeader label="P" k="physical" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
-            <SortHeader label="C" k="carSetup" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
-            <SortHeader label="S" k="speed" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="OVR" k="overall" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="DRV" k="driving" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="PHY" k="physical" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="CAR" k="carSetup" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="SPD" k="speed" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
           </tr>
         </thead>
         <tbody>
           {sorted.map(d => {
             const t = teamByDriver.get(d.id);
             const sk = effectiveDriverSkills(d);
+            const ovr = driverOverall(d);
             return (
               <tr key={d.id}>
                 <td><button className="link-btn" onClick={() => setPopupDriver(d)}>{d.name}</button>
                   {d.retirementAnnounced && <span className="retiring"> ⏳</span>}
                   {d.injuredRaces > 0 && <span className="injury"> 🚑{d.injuredRaces}</span>}</td>
+                <td title={d.country}>{d.flag}</td>
                 <td style={{ color: t?.color }}>{t?.name ?? <em className="muted">Free Agent</em>}</td>
                 <td>{d.age - d.careerStartAge + 1}</td>
                 <td>{d.age}</td>
                 <td><span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span></td>
                 <td>{d.archetype}</td>
+                <td><strong>{ovr}</strong></td>
                 <td>{sk.driving}</td>
                 <td>{sk.physical}</td>
                 <td>{sk.carSetup}</td>
@@ -466,14 +662,14 @@ function TeamsTab() {
 }
 
 function RosterLine({ label, d, onClick }: { label: string; d: Driver | null | undefined; onClick?: () => void }) {
-  if (!d) return <div>{label}: —</div>;
-  const sk = effectiveDriverSkills(d);
+  if (!d) return <div className="driver-line">{label}: —</div>;
+  const ovr = driverOverall(d);
   return (
     <div className="driver-line">
-      <strong>{label}:</strong> <button className="link-btn" onClick={onClick}>{d.name}</button>{' '}
+      <strong>{label}:</strong> <span title={d.country}>{d.flag}</span>{' '}
+      <button className="link-btn" onClick={onClick}>{d.name}</button>{' '}
       <span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span>{' '}
-      <em>{d.archetype}</em>{' '}
-      <span className="muted">age {d.age} · D{sk.driving} P{sk.physical} C{sk.carSetup} S{sk.speed}</span>
+      <span className="ovr-badge">OVR {ovr}</span>
       {d.injuredRaces > 0 && <span className="injury"> 🚑 out {d.injuredRaces}</span>}
       {d.retirementAnnounced && <span className="retiring"> ⏳ final season</span>}
     </div>
@@ -671,16 +867,17 @@ function PopupShell({ title, onClose, children, accentColor }: { title: string; 
   );
 }
 
-function DriverDetailPopup({ driver }: { driver: Driver; onClose: () => void }) {
+function DriverDetailPopup({ driver, onClose }: { driver: Driver; onClose: () => void }) {
   const { state } = useGame();
   const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
   const sk = effectiveDriverSkills(driver);
+  const ovr = driverOverall(driver);
   const totalPoints = driver.yearHistory.reduce((a, b) => a + b.points, 0);
   return (
-    <PopupShell title={driver.name} onClose={() => { /* handled by parent */ }}>
+    <PopupShell title={`${driver.flag} ${driver.name}`} onClose={onClose}>
       <div className="popup-meta">
-        <div><span className={`rarity rarity-${driver.rarity}`}>{driver.rarity}</span> · {driver.archetype}</div>
-        <div>Age {driver.age} · Years active: {driver.yearHistory.length || (driver.age - driver.careerStartAge + 1)}</div>
+        <div><span className={`rarity rarity-${driver.rarity}`}>{driver.rarity}</span> · {driver.archetype} · <strong>OVR {ovr}</strong></div>
+        <div>{driver.country} · Age {driver.age} · Years active: {driver.yearHistory.length || (driver.age - driver.careerStartAge + 1)}</div>
         {driver.retired && <div className="muted">⏹️ Retired</div>}
         {driver.retirementAnnounced && !driver.retired && <div className="retiring">⏳ Final season announced</div>}
       </div>
@@ -702,8 +899,8 @@ function DriverDetailPopup({ driver }: { driver: Driver; onClose: () => void }) 
       </div>
       <h3>Year-by-year</h3>
       {driver.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
-        <table className="data-table compact">
-          <thead><tr><th>Year</th><th>Team</th><th>Races</th><th>Wins</th><th>Podiums</th><th>Poles</th><th>Points</th><th></th></tr></thead>
+        <table className="data-table compact history-table">
+          <thead><tr><th>Year</th><th>Team</th><th>Races</th><th>Wins</th><th>Podiums</th><th>Poles</th><th>Points</th><th>Title</th></tr></thead>
           <tbody>
             {driver.yearHistory.map((y, i) => (
               <tr key={i}>
@@ -725,9 +922,8 @@ function DriverDetailPopup({ driver }: { driver: Driver; onClose: () => void }) 
 }
 
 function TeamDetailPopup({ team, onClose }: { team: Team; onClose: () => void }) {
-  void onClose;
   return (
-    <PopupShell title={team.name} onClose={() => { /* handled by parent */ }} accentColor={team.color}>
+    <PopupShell title={team.name} onClose={onClose} accentColor={team.color}>
       <div className="popup-meta">
         <div>{team.shortName} · Tier: {team.tier} · Legacy base: {team.legacyBaseValue}</div>
       </div>
@@ -748,7 +944,7 @@ function TeamDetailPopup({ team, onClose }: { team: Team; onClose: () => void })
       </div>
       <h3>Year-by-year</h3>
       {team.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
-        <table className="data-table compact">
+        <table className="data-table compact history-table">
           <thead><tr><th>Year</th><th>Pos</th><th>Points</th><th>Wins</th><th>Podiums</th><th>Poles</th><th>Car Avg</th><th>Titles</th></tr></thead>
           <tbody>
             {team.yearHistory.map((y: TeamYearRecord, i) => (
@@ -771,11 +967,10 @@ function TeamDetailPopup({ team, onClose }: { team: Team; onClose: () => void })
 }
 
 function EngDirectorDetailPopup({ director, onClose }: { director: EngineeringDirector; onClose: () => void }) {
-  void onClose;
   const { state } = useGame();
   const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
   return (
-    <PopupShell title={director.name} onClose={() => { /* handled by parent */ }}>
+    <PopupShell title={director.name} onClose={onClose}>
       <div className="popup-meta">
         <div><span className={`rarity rarity-${director.rarity}`}>{director.rarity}</span> · Engineering Director</div>
         <div>Age {director.age} · Years remaining: {Math.max(0, director.yearsRemaining)}</div>
@@ -791,7 +986,7 @@ function EngDirectorDetailPopup({ director, onClose }: { director: EngineeringDi
       </div>
       <h3>Career at teams</h3>
       {director.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
-        <table className="data-table compact">
+        <table className="data-table compact history-table">
           <thead><tr><th>Year</th><th>Team</th><th>Team Wins</th><th>Podiums</th><th>Poles</th><th>Titles</th></tr></thead>
           <tbody>
             {director.yearHistory.map((y, i) => (
@@ -812,11 +1007,10 @@ function EngDirectorDetailPopup({ director, onClose }: { director: EngineeringDi
 }
 
 function RaceDirectorDetailPopup({ director, onClose }: { director: RaceDirector; onClose: () => void }) {
-  void onClose;
   const { state } = useGame();
   const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
   return (
-    <PopupShell title={director.name} onClose={() => { /* handled by parent */ }}>
+    <PopupShell title={director.name} onClose={onClose}>
       <div className="popup-meta">
         <div><span className={`rarity rarity-${director.rarity}`}>{director.rarity}</span> · Race Director</div>
         <div>Age {director.age} · Years remaining: {Math.max(0, director.yearsRemaining)}</div>
@@ -829,7 +1023,7 @@ function RaceDirectorDetailPopup({ director, onClose }: { director: RaceDirector
       </div>
       <h3>Career at teams</h3>
       {director.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
-        <table className="data-table compact">
+        <table className="data-table compact history-table">
           <thead><tr><th>Year</th><th>Team</th><th>Team Wins</th><th>Podiums</th><th>Poles</th><th>Titles</th></tr></thead>
           <tbody>
             {director.yearHistory.map((y, i) => (
@@ -853,18 +1047,19 @@ function RaceDirectorDetailPopup({ director, onClose }: { director: RaceDirector
 // RACE WEEKEND OVERLAY — invoked when phase is pre_race / qualifying_* / race_results
 // ============================================================================
 function RaceWeekendOverlay() {
-  const { state, returnToMenu, runQualifying, startRace, finishCurrentRace } = useGame();
+  const { state, returnToMenu, runQualifying, startRace, finishCurrentRace, universeName } = useGame();
   const gp = state.calendar[state.currentRound - 1];
   const driverMap = useMemo(() => allDriversMap(state), [state]);
 
   return (
     <div className="app">
       <header className="header">
-        <h1>F1 Sim</h1>
+        <h1>F1 Sim <span className="universe-label">— {universeName}</span></h1>
         <div className="header-info">
           <span>Year {state.year}</span>
           <span>Round {state.currentRound} / {state.calendar.length}</span>
           <button onClick={returnToMenu} className="cancel-btn">← Back to menu</button>
+          <GearMenu />
         </div>
       </header>
       <main>
@@ -903,6 +1098,7 @@ function PreRacePane({ gp, onRunQ }: { gp: any; onRunQ: () => void }) {
 
 function QualifyingPane({ onStartRace }: { gp: any; onStartRace: () => void }) {
   const { state } = useGame();
+  const audio = useAudio();
   const q = state.lastQualiResult!;
   const driverMap = useMemo(() => allDriversMap(state), [state]);
   const teamByDriver = useMemo(() => teamByDriverMap(state.teams), [state.teams]);
@@ -927,6 +1123,16 @@ function QualifyingPane({ onStartRace }: { gp: any; onStartRace: () => void }) {
     const t = setTimeout(() => setStep(s => s + 1), 1200);
     return () => clearTimeout(t);
   }, [step, autoplay, maxStep]);
+
+  // Audio cue when reveal advances
+  useEffect(() => {
+    if (step > 0 && step < maxStep - 1) audio.play('tick');
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pole sound at Q2 final
+  useEffect(() => {
+    if (!isQ1Phase && step === maxStep - 1) audio.play('pole');
+  }, [step, isQ1Phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isQ1Done = isQ1Phase && step === maxStep - 1;
   const isQ2Done = !isQ1Phase && step === maxStep - 1;
@@ -1019,6 +1225,7 @@ function Q1DoneAction() {
 
 function RaceResultsPane({ onFinish }: { onFinish: () => void }) {
   const { state } = useGame();
+  const audio = useAudio();
   const r = state.lastRaceResult!;
   const driverMap = useMemo(() => allDriversMap(state), [state]);
   const teamByDriver = useMemo(() => teamByDriverMap(state.teams), [state.teams]);
@@ -1034,6 +1241,39 @@ function RaceResultsPane({ onFinish }: { onFinish: () => void }) {
     const t = setTimeout(() => setSnap(s => s + 1), dramatic ? 2000 : 1400);
     return () => clearTimeout(t);
   }, [snap, autoplay, totalSnapshots]);
+
+  // Audio: lights out when component mounts (race start), engine loop during race,
+  // checkered at end. Cleanup ensures engine stops if user navigates away.
+  useEffect(() => {
+    audio.play('lights_out');
+    // Start engine loop a bit after lights out
+    const startTimer = setTimeout(() => audio.startEngineLoop(), 1500);
+    return () => {
+      clearTimeout(startTimer);
+      audio.stopEngineLoop();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cues per snapshot reveal: incidents → crash sound, big position swings → overtake.
+  useEffect(() => {
+    if (snap === 0) return;
+    // Crash if any incident this lap is a real DNF/collision
+    const hasCrash = cur.newIncidents.some(inc =>
+      inc.type === 'crash_dnf' || inc.type === 'mechanical_dnf' || inc.causesInjury
+    );
+    if (hasCrash) audio.play('crash');
+    // Overtakes: count drivers who gained ≥2 positions vs quali at this snapshot
+    const bigMover = Object.values(cur.positionsGainedVsQuali).filter(v => v >= 2).length;
+    if (!hasCrash && bigMover > 0) audio.play('overtake');
+  }, [snap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Checkered + engine stop at final reveal
+  useEffect(() => {
+    if (isFinal) {
+      audio.stopEngineLoop();
+      setTimeout(() => audio.play('checkered'), 200);
+    }
+  }, [isFinal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lapLabel = (lap: number) => {
     if (lap === 0) return 'Starting Grid';
@@ -1146,6 +1386,7 @@ function sortDrivers(drivers: Driver[], k: DriverSortKey, asc: boolean, teamByDr
       case 'physical': return dir * (sa.physical - sb.physical);
       case 'carSetup': return dir * (sa.carSetup - sb.carSetup);
       case 'speed': return dir * (sa.speed - sb.speed);
+      case 'overall': return dir * (driverOverall(a) - driverOverall(b));
       case 'years': return dir * ((a.age - a.careerStartAge) - (b.age - b.careerStartAge));
     }
   });

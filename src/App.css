@@ -215,3 +215,72 @@ button.close-btn:hover { color: #000; }
   background: #f5f5f5; padding: 6px 12px; border-radius: 4px; font-size: 13px;
 }
 .skills-row strong, .stats-row strong { color: #1a1a1a; }
+
+/* === Home screen === */
+.home-screen {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.universe-list {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 20px 0;
+}
+.universe-card {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px; background: #fafafa; border-radius: 6px;
+  border: 1px solid #eee;
+}
+.universe-info strong { font-size: 16px; }
+.universe-info .muted { font-size: 12px; margin-top: 4px; }
+.universe-actions { display: flex; gap: 8px; }
+button.danger {
+  background: #fff; color: #dc2626; border-color: #dc2626;
+}
+button.danger:hover { background: #dc2626; color: #fff; }
+.delete-confirm {
+  margin-top: 12px; padding: 12px; background: #fef2f2;
+  border-radius: 4px; display: flex; gap: 8px; align-items: center;
+  flex-basis: 100%; font-size: 13px;
+}
+.create-form {
+  margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 6px;
+}
+.create-form input {
+  width: 100%; padding: 10px 12px; border: 1px solid #ddd;
+  border-radius: 4px; font-size: 14px; margin: 8px 0;
+}
+
+/* === Gear menu === */
+.gear-menu-container { position: relative; }
+.gear-btn {
+  background: #333; color: #fff; border: 1px solid #555;
+  font-size: 16px; padding: 4px 10px; border-radius: 4px;
+}
+.gear-btn:hover { background: #444; }
+.gear-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 6px;
+  background: #fff; color: #1a1a1a; border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  padding: 8px; min-width: 200px; z-index: 50;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.gear-menu button {
+  text-align: left; background: transparent; border: none;
+  padding: 8px 12px; border-radius: 4px;
+}
+.gear-menu button:hover { background: #f0f0f0; }
+.gear-audio { padding: 8px 12px; font-size: 13px; border-top: 1px solid #eee; border-bottom: 1px solid #eee; }
+.gear-audio label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.gear-audio input[type="range"] { width: 100%; margin-top: 6px; }
+.universe-label { font-weight: 400; opacity: 0.7; font-size: 14px; margin-left: 4px; }
+
+/* === Year-by-year table polish in popup === */
+.history-table { margin-top: 8px; }
+.history-table th { background: #f5f5f5; }
+.history-table td:first-child { font-weight: 500; }
+
+/* === OVR badge === */
+.ovr-badge {
+  background: #1a1a1a; color: #fff; font-size: 11px;
+  padding: 1px 6px; border-radius: 3px; font-weight: 600;
+}

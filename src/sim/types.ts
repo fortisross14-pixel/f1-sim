@@ -73,6 +73,9 @@ export interface DriverYearRecord {
 export interface Driver {
   id: string;
   name: string;
+  country: string;             // display name (e.g., "United Kingdom")
+  countryCode: string;         // ISO alpha-2 (e.g., "GB")
+  flag: string;                // emoji
   rarity: Rarity;
   archetype: DriverArchetype;
   potentialSkills: DriverSkills; // ceiling
@@ -120,6 +123,9 @@ export interface DirectorYearRecord {
 export interface EngineeringDirector {
   id: string;
   name: string;
+  country: string;
+  countryCode: string;
+  flag: string;
   rarity: Rarity;
   // Target-based pull model: the director "pulls" each car stat toward
   // their target value. Better directors have higher targets and stronger pull.
@@ -140,6 +146,9 @@ export interface EngineeringDirector {
 export interface RaceDirector {
   id: string;
   name: string;
+  country: string;
+  countryCode: string;
+  flag: string;
   rarity: Rarity;
   reliabilityBonus: number;  // small
   timeImprovementPct: number; // 0.5% common -> 2% legend
