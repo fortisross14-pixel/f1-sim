@@ -1,7 +1,7 @@
 import {
   Driver, DriverSkills, DriverArchetype, ALL_ARCHETYPES,
   EngineeringDirector, RaceDirector,
-  Team, CarStats, Circuit, GrandPrix, Weather,
+  Team, CarStats, CarSpecialty, Circuit, GrandPrix, Weather,
   Rarity, POOL_RARITY_TARGETS,
 } from './types';
 import { RNG, clamp, makeId } from './rng';
@@ -248,7 +248,17 @@ export function rollCarStats(rng: RNG, legacyBase: number): CarStats {
     acceleration: roll(),
     turning: roll(),
     reliability: roll(),
+    circuitSpecialty: rollCarSpecialty(rng),
   };
+}
+
+// Roll a car's circuit specialty. Each of the 4 profile specialties + all_rounder
+// is equally likely, so on average 1 in 5 cars is an all-rounder. Tunable.
+function rollCarSpecialty(rng: RNG): CarSpecialty {
+  return rng.pickWeighted(
+    ['linear', 'mixed', 'technical', 'balanced', 'all_rounder'] as CarSpecialty[],
+    [0.2, 0.2, 0.2, 0.2, 0.2]
+  );
 }
 
 export function carStatsWithDirector(
@@ -268,6 +278,7 @@ export function carStatsWithDirector(
     acceleration: clamp(pull(base.acceleration, eng.accelTarget),       0, 110),
     turning:      clamp(pull(base.turning,      eng.turningTarget),     0, 110),
     reliability:  clamp(pull(base.reliability,  eng.reliabilityTarget), 0, 110),
+    circuitSpecialty: base.circuitSpecialty, // specialty is a car trait, director doesn't change it
   };
 }
 

@@ -11,6 +11,7 @@ import { Flag } from '../common/Flag';
 import { RarityChip } from '../common/RarityChip';
 import { OvrBadge } from '../common/OvrBadge';
 import { TeamLogo } from '../common/TeamLogo';
+import { SpecialtyChip } from '../common/SpecialtyChip';
 import { allDriversMap } from '../common/helpers';
 
 // Grid of team cards, sorted by current constructor-standings position.
@@ -103,7 +104,10 @@ export function TeamsTab() {
 
               {/* Car stats */}
               <div className="team-card-section team-card-car">
-                <div className="team-card-section-label">Car</div>
+                <div className="team-card-section-label">
+                  Car
+                  <SpecialtyChip specialty={t.car.circuitSpecialty} />
+                </div>
                 <div className="car-stats">
                   <CarStat label="SPD" value={t.car.maxSpeed} />
                   <CarStat label="ACC" value={t.car.acceleration} />

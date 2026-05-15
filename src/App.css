@@ -1589,8 +1589,123 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
 /* ============================================================================ */
 
 /* ============================================================================
-   RACE WEEKEND — PRE-RACE
+   ENGINE FEATURE BITS (specialty chip, circuit popup, last-here row)
    ============================================================================ */
+
+/* All-rounder uses a neutral metallic gradient to feel distinct from the
+   4 profile colors (which match the calendar profile chip palette) */
+.specialty-all-rounder {
+  background: linear-gradient(135deg, #FEF3C7 0%, #FCD34D 100%);
+  color: #78350F;
+  border-color: #F59E0B;
+}
+/* Specialty chip when used inside a section label — slightly inset */
+.team-card-section-label .mini-chip {
+  margin-left: var(--sp-2);
+  vertical-align: middle;
+}
+.popup-body h3 .mini-chip {
+  margin-left: var(--sp-2);
+  vertical-align: middle;
+  font-size: 10px;
+}
+
+/* "Last time here" row on pre-race screen */
+.prerace-history-row {
+  background: var(--bg-subtle);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+}
+.prerace-history-row-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+.prerace-cards-history {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.prerace-card-history {
+  /* Slightly subdued vs the main 4 cards */
+  background: var(--bg-card);
+}
+.prerace-card-history::before {
+  background: #FFD057; /* Subtle gold edge for historical content */
+}
+.prerace-card-history-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+.prerace-history-link {
+  background: transparent;
+  border: none;
+  color: var(--f1-red);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 0;
+  margin-top: var(--sp-1);
+}
+.prerace-history-link:hover { text-decoration: underline; background: transparent; }
+
+/* Make the circuit name clickable in the prerace hero */
+.prerace-hero-title-clickable {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  transition: color var(--t-base) var(--ease);
+}
+.prerace-hero-title-clickable:hover {
+  color: var(--f1-red);
+  background: transparent;
+}
+
+/* Make the calendar table circuit-name clickable */
+.circuit-name-link {
+  background: transparent;
+  border: none;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 0;
+  border-bottom: 1px dotted transparent;
+  transition: all var(--t-base) var(--ease);
+}
+.circuit-name-link:hover {
+  color: var(--f1-red);
+  border-bottom-color: var(--f1-red);
+  background: transparent;
+}
+.row-future .circuit-name-link {
+  color: var(--text-secondary);
+}
+
+/* Circuit detail popup hero */
+.popup-circuit-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  position: relative;
+}
+.popup-circuit-identity { flex: 1; }
+.stat-tile-value-name {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--font-body);
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+/* ============================================================================ */
+
+
 
 .prerace-screen { display: flex; flex-direction: column; gap: var(--sp-5); }
 

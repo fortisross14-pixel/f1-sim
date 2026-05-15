@@ -1,6 +1,7 @@
 import { Team, TeamYearRecord } from '../../sim/types';
 import { PopupShell } from './PopupShell';
 import { TeamLogo } from '../common/TeamLogo';
+import { SpecialtyChip } from '../common/SpecialtyChip';
 
 // Team detail popup.
 //
@@ -28,7 +29,10 @@ export function TeamDetailPopup({ team, onClose }: { team: Team; onClose: () => 
         </div>
       }
     >
-      <h3>Current car</h3>
+      <h3>
+        Current car
+        <SpecialtyChip specialty={team.car.circuitSpecialty} />
+      </h3>
       <div className="car-stat-grid">
         <CarStatTile label="Max Speed"    value={team.car.maxSpeed} />
         <CarStatTile label="Acceleration" value={team.car.acceleration} />

@@ -1,7 +1,7 @@
 import {
-  Driver, Team, GrandPrix, Weather, CircuitProfile,
+  Driver, Team, GrandPrix, Weather, CircuitProfile, CarSpecialty,
   QualifyingResult, QualifyingTick, RaceResult, RaceLapSnapshot, RaceIncident,
-  RACE_POINTS, FASTEST_LAP_BONUS, EngineeringDirector, RaceDirector,
+  RACE_POINTS, FASTEST_LAP_BONUS, EngineeringDirector, RaceDirector, Rarity,
 } from './types';
 import { effectiveDriverSkills } from './generators';
 import { RNG, clamp } from './rng';
@@ -53,9 +53,14 @@ function weatherDriverMod(d: Driver, weather: Weather): number {
     return mod;
   }
   if (weather === 'rain') {
-    // Driving skill matters; archetype 'wet_specialist' huge boost
+    // Driving skill matters; archetype 'wet_specialist' is a big edge.
+    // Scaled by rarity so a rare+ wet specialist can credibly podium even
+    // on a mid-tier car when it rains. The intent: rare wet specialists
+    // become "rain weapons" the way Senna was at Donington.
     let mod = (effectiveDriverSkills(d).driving - 75) * 0.20;
-    if (d.archetype === 'wet_specialist') mod += 5;
+    if (d.archetype === 'wet_specialist') {
+      mod += wetSpecialistBonus(d.rarity);
+    }
     if (d.archetype === 'aggressive' || d.archetype === 'hothead') mod -= 1.5;
     if (d.archetype === 'conservative') mod += 1;
     if (d.archetype === 'calculator') mod += 2; // smart line choices in wet
@@ -66,16 +71,42 @@ function weatherDriverMod(d: Driver, weather: Weather): number {
   return 0;
 }
 
-// Archetype-specific phase modifier (quali vs race)
+// Rarity-scaled wet specialist bonus. Common/uncommon get the legacy +5;
+// rare+ scale up so they reliably challenge for podiums in the rain.
+function wetSpecialistBonus(rarity: Rarity): number {
+  switch (rarity) {
+    case 'legend':   return 15;
+    case 'epic':     return 12;
+    case 'rare':     return 9;
+    case 'uncommon': return 5;
+    case 'common':   return 5;
+  }
+}
+
+// Archetype-specific phase modifier (quali vs race). Qualifier bonus in Q
+// is rarity-scaled so a rare+ qualifier can mix it with top cars in qualifying.
 function archetypePhaseMod(d: Driver, phase: 'quali' | 'race'): number {
   if (phase === 'quali') {
-    if (d.archetype === 'qualifier') return 3;
+    if (d.archetype === 'qualifier') return qualifierBonus(d.rarity);
     if (d.archetype === 'racer') return -2;
   } else {
     if (d.archetype === 'racer') return 3;
+    // Qualifier identity is qualifying-only — slight race penalty as before.
     if (d.archetype === 'qualifier') return -2;
   }
   return 0;
+}
+
+// Rarity-scaled qualifying bonus. Common/uncommon stay at +3; rare+ scale up
+// so an epic qualifier can land on the front row even with a mid-tier car.
+function qualifierBonus(rarity: Rarity): number {
+  switch (rarity) {
+    case 'legend':   return 9;
+    case 'epic':     return 7;
+    case 'rare':     return 5;
+    case 'uncommon': return 3;
+    case 'common':   return 3;
+  }
 }
 
 // Compute a driver's raw "rating" for the GP. Higher = faster.
@@ -130,6 +161,12 @@ function performanceRating(
   const weatherMod = weatherDriverMod(e.driver, ctx.gp.weather);
   const phaseMod = archetypePhaseMod(e.driver, phase);
 
+  // Car circuit specialty bonus. A matching specialty gives the car a real
+  // edge (~6 rating points ≈ 0.5s/lap × 50 laps = 25s race-pace bonus).
+  // An all-rounder car gets a smaller bonus on every circuit. Mismatch = 0,
+  // no penalty.
+  const specialtyMod = carSpecialtyBonus(car.circuitSpecialty, ctx.gp.circuit.profile);
+
   // Combine. Car/driver each ~60-100 range; we want resulting rating roughly 60-110.
   // Use a 55/45 split for car vs driver overall.
   const base = 0.55 * carScore + 0.45 * driverScore;
@@ -153,7 +190,18 @@ function performanceRating(
   }
   const noise = rng.normal(0, noiseStd);
 
-  return base + raceDirBonus + weatherMod + phaseMod + noise;
+  return base + raceDirBonus + weatherMod + phaseMod + specialtyMod + noise;
+}
+
+// Car specialty → circuit profile bonus. Matching specialty gives the car
+// ~0.5s/lap. All-rounder gets a quarter of that bonus on every circuit so
+// it's never disadvantaged but never optimal either. Mismatch = 0.
+function carSpecialtyBonus(carSpec: CarSpecialty, profile: CircuitProfile): number {
+  const MATCH = 6;       // ~0.48s/lap × 50 laps = 24s — enough to matter, not enough to dominate
+  const ALL_ROUNDER = 1.5; // ~0.12s/lap × 50 laps = 6s — small but always-on edge
+  if (carSpec === 'all_rounder') return ALL_ROUNDER;
+  if (carSpec === profile) return MATCH;
+  return 0;
 }
 
 // Convert a rating to a lap time in seconds.

@@ -164,11 +164,24 @@ export interface RaceDirector {
 
 export type TeamTier = 'top' | 'mid' | 'bottom';
 
+// A car's circuit specialty — applies a per-lap time bonus when matched to
+// the circuit profile. all_rounder gets a smaller bonus on every circuit.
+export type CarSpecialty =
+  | 'linear'
+  | 'mixed'
+  | 'technical'
+  | 'balanced'
+  | 'all_rounder';
+
 export interface CarStats {
   maxSpeed: number;       // 0-100
   acceleration: number;   // 0-100
   turning: number;        // 0-100
   reliability: number;    // 0-100, higher = lower DNF chance
+  // Circuit specialty: rolled at season start, re-rolled each preseason.
+  // Adds a time bonus on matching circuits; all_rounder adds a smaller
+  // bonus on every circuit. Mismatch = no bonus, no penalty.
+  circuitSpecialty: CarSpecialty;
 }
 
 // One year's record for a team. Captures final standings + key stats.
@@ -283,9 +296,30 @@ export interface SeasonState {
   // Completed race results this season (for "results so far" listing in WC tab).
   // Maps round number → { qualifying, race }. Cleared on new season.
   completedRaces: Record<number, { qualifying: QualifyingResult; race: RaceResult }>;
+  // Per-circuit history: every race ever run at each circuit name, persists
+  // across seasons. Keyed by circuit name (since circuit IDs regenerate each
+  // year). Used for "Last year here" callouts and the circuit detail popup.
+  circuitHistory: Record<string, CircuitHistoryEntry[]>;
   // Preseason cache: the most recent end-of-year transition data so the user
   // can browse Summary / Market / Cars even after entering year N+1.
   lastPreseasonData?: PreseasonData;
+}
+
+// One race result at a given circuit, captured for the long-term circuit log.
+// Stored under SeasonState.circuitHistory[circuitName].
+export interface CircuitHistoryEntry {
+  year: number;
+  round: number;
+  weather: Weather;
+  winnerDriverId: string;
+  winnerDriverName: string;     // captured so retirement / rename later doesn't break the row
+  winnerTeamId: string;
+  winnerTeamName: string;
+  winnerTeamColor: string;
+  poleDriverId: string;
+  poleDriverName: string;
+  fastestLapDriverId: string;
+  fastestLapDriverName: string;
 }
 
 // Captured at end of each season — drives the Preseason sub-tab.

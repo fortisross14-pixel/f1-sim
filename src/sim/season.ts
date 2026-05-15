@@ -2,6 +2,7 @@ import {
   Driver, Team, EngineeringDirector, RaceDirector,
   SeasonState, GamePhase, Rarity, POOL_RARITY_TARGETS,
   RaceResult, PreseasonData, DriverYearRecord,
+  CircuitHistoryEntry, Weather,
 } from './types';
 import {
   createDriver, createEngineeringDirector, createRaceDirector,
@@ -57,6 +58,7 @@ export function createNewSeason(seed?: number): SeasonState {
     freeAgentEngDirectorIds: draftResult.freeAgentEngDirectorIds,
     freeAgentRaceDirectorIds: draftResult.freeAgentRaceDirectorIds,
     completedRaces: {},
+    circuitHistory: {},
   };
 }
 
@@ -160,6 +162,54 @@ export function decrementInjuries(state: SeasonState): void {
   for (const d of state.drivers) {
     if (d.injuredRaces > 0) d.injuredRaces--;
   }
+}
+
+// Append a circuit history entry after a race finishes. Keeps the per-circuit
+// log (keyed by circuit name) so we can show "Last year here" and a circuit
+// detail popup with all-time results.
+export function recordCircuitHistory(
+  state: SeasonState,
+  circuitName: string,
+  round: number,
+  weather: Weather,
+  poleDriverId: string,
+  result: RaceResult
+): void {
+  // Resolve names from current state. We pull team via current team-by-driver
+  // map; if the winner has already retired before we get here, this still
+  // works because retired drivers are still in state.drivers at the moment
+  // of this call (retirement happens at season transition, not mid-race).
+  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
+  const teamByDriver = new Map<string, Team>();
+  for (const t of state.teams) {
+    if (t.driver1Id) teamByDriver.set(t.driver1Id, t);
+    if (t.driver2Id) teamByDriver.set(t.driver2Id, t);
+    if (t.testDriverId) teamByDriver.set(t.testDriverId, t);
+  }
+  const winnerId = result.finalRanking[0];
+  const winner = driverMap.get(winnerId);
+  const winnerTeam = teamByDriver.get(winnerId);
+  const pole = driverMap.get(poleDriverId);
+  const flDriver = driverMap.get(result.fastestLapDriverId);
+
+  const entry: CircuitHistoryEntry = {
+    year: state.year,
+    round,
+    weather,
+    winnerDriverId: winnerId,
+    winnerDriverName: winner?.name ?? 'Unknown',
+    winnerTeamId: winnerTeam?.id ?? '',
+    winnerTeamName: winnerTeam?.name ?? 'Unknown',
+    winnerTeamColor: winnerTeam?.color ?? '#888',
+    poleDriverId: poleDriverId,
+    poleDriverName: pole?.name ?? 'Unknown',
+    fastestLapDriverId: result.fastestLapDriverId,
+    fastestLapDriverName: flDriver?.name ?? 'Unknown',
+  };
+  if (!state.circuitHistory[circuitName]) {
+    state.circuitHistory[circuitName] = [];
+  }
+  state.circuitHistory[circuitName].push(entry);
 }
 
 // ============================================================================

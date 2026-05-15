@@ -4,7 +4,7 @@ import {
 } from './sim/types';
 import {
   createNewSeason, applyRaceResult, applyQualiResult,
-  decrementInjuries, advanceToNewSeason,
+  decrementInjuries, advanceToNewSeason, recordCircuitHistory,
 } from './sim/season';
 import { simulateQualifying, simulateRace } from './sim/race';
 import { RNG } from './sim/rng';
@@ -97,6 +97,16 @@ export function GameProvider({
   const finishCurrentRace = useCallback(() => {
     if (!state.lastRaceResult || !state.lastQualiResult) return;
     applyRaceResult(state, state.lastRaceResult);
+    // Record this race into the permanent per-circuit history log
+    const gp = state.calendar[state.currentRound - 1];
+    recordCircuitHistory(
+      state,
+      gp.circuit.name,
+      state.currentRound,
+      gp.weather,
+      state.lastQualiResult.poleDriverId,
+      state.lastRaceResult
+    );
     state.completedRaces[state.currentRound] = {
       qualifying: state.lastQualiResult,
       race: state.lastRaceResult,

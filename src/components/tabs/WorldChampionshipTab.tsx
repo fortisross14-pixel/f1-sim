@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useGame } from '../../GameContext';
-import { PreseasonData, Driver, Team } from '../../sim/types';
+import { PreseasonData, Driver, Team, Circuit } from '../../sim/types';
 import { useAudio } from '../../audio';
 import { DriverDetailPopup } from '../popups/DriverDetailPopup';
 import { TeamDetailPopup } from '../popups/TeamDetailPopup';
+import { CircuitDetailPopup } from '../popups/CircuitDetailPopup';
 import { DriverLink } from '../common/DriverLink';
 import { Flag } from '../common/Flag';
 import { TeamLogo } from '../common/TeamLogo';
@@ -116,6 +117,7 @@ function RaceActionBar() {
 function CalendarView() {
   const { state } = useGame();
   const [popupDriver, setPopupDriver] = useState<Driver | null>(null);
+  const [popupCircuit, setPopupCircuit] = useState<Circuit | null>(null);
   const allDrivers = useMemo(
     () => state.drivers.concat(state.retiredDrivers),
     [state.drivers, state.retiredDrivers]
@@ -153,7 +155,13 @@ function CalendarView() {
                   <span className="round-badge">{gp.round}</span>
                 </td>
                 <td className="cell-circuit">
-                  <span className="circuit-name">{gp.circuit.name}</span>
+                  <button
+                    className="link-btn circuit-name circuit-name-link"
+                    onClick={() => setPopupCircuit(gp.circuit)}
+                    title="View circuit history"
+                  >
+                    {gp.circuit.name}
+                  </button>
                   {isCurrent && <span className="next-pill">Next</span>}
                 </td>
                 <td className="col-country">{gp.circuit.country}</td>
@@ -181,6 +189,13 @@ function CalendarView() {
       </table>
 
       {popupDriver && <DriverDetailPopup driver={popupDriver} onClose={() => setPopupDriver(null)} />}
+      {popupCircuit && (
+        <CircuitDetailPopup
+          circuit={popupCircuit}
+          history={state.circuitHistory[popupCircuit.name] ?? []}
+          onClose={() => setPopupCircuit(null)}
+        />
+      )}
     </>
   );
 }
