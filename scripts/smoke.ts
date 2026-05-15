@@ -1,6 +1,6 @@
 // Smoke test: run a full season and print summary stats to verify mechanics.
 // Run with: npx tsx scripts/smoke.ts
-import { createNewSeason, applyRaceResult, applyQualiResult, decrementInjuries, advanceToNewSeason, buildSeasonSummary, recalcStandings } from '../src/sim/season';
+import { createNewSeason, applyRaceResult, applyQualiResult, decrementInjuries, advanceToNewSeason, recalcStandings } from '../src/sim/season';
 import { simulateQualifying, simulateRace } from '../src/sim/race';
 import { RNG } from '../src/sim/rng';
 
@@ -80,14 +80,20 @@ console.log(`\nGap between 1st and 3rd: ${top3Gap} points`);
 // Advance season
 console.log('\n=== ADVANCING TO YEAR 2 ===');
 const result = advanceToNewSeason(state, rng);
-console.log(`Retirement/rookie moves: ${result.retirementMoves.length}`);
-console.log(`Market signings: ${result.marketMoves.length}`);
-console.log(`Car stat changes: ${result.newCarChanges.length}`);
+console.log(`Retirements: ${result.retirements.length}`);
+console.log(`Rookie arrivals: ${result.rookieArrivals.length}`);
+console.log(`Releases (fired): ${result.releases.length}`);
+console.log(`Signings: ${result.signings.length}`);
+console.log(`Car evolution rows: ${result.carEvolution.length}`);
 
-// Sample retirements
-console.log('\nSample moves:');
-result.retirementMoves.slice(0, 5).forEach(m => {
-  console.log(`  ${m.kind}: ${m.entityName} (${m.entityRarity})`);
+// Sample
+console.log('\nSample retirements:');
+result.retirements.slice(0, 5).forEach(m => {
+  console.log(`  ${m.kind}: ${m.name} (${m.rarity})`);
+});
+console.log('\nSample signings:');
+result.signings.slice(0, 5).forEach(m => {
+  console.log(`  signed: ${m.name} (${m.rarity}) -> ${m.toTeam} as ${m.position}`);
 });
 
 console.log('\nYear 2 driver pool:');

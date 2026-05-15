@@ -1,29 +1,26 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import {
-  SeasonState, QualifyingResult, RaceResult,
+  SeasonState, QualifyingResult, RaceResult, PreseasonData,
 } from './sim/types';
 import {
   createNewSeason, applyRaceResult, applyQualiResult,
-  decrementInjuries, advanceToNewSeason, buildSeasonSummary, SeasonSummary,
+  decrementInjuries, advanceToNewSeason,
 } from './sim/season';
 import { simulateQualifying, simulateRace } from './sim/race';
 import { RNG } from './sim/rng';
-import { MarketMove } from './sim/market';
-import { Team } from './sim/types';
 
 interface GameContextValue {
   state: SeasonState;
-  // race flow
-  runQualifying: () => QualifyingResult;
-  runRace: () => RaceResult;
-  advanceToNextGP: () => void;
+  // race weekend flow — split into Q1, Q2, and Race so user clicks through each
+  startRaceWeekend: () => void;        // enter pre_race phase from menu
+  runQualifying: () => QualifyingResult; // runs full Q (Q1+Q2), splits ticks for UI to step through
+  advanceToQ2: () => void;              // transition from showing Q1 to showing Q2 ticks
+  startRace: () => RaceResult;
+  finishCurrentRace: () => void;       // commits race result, advances round, returns to menu (or preseason if last race)
   // season flow
-  finishSeason: () => SeasonSummary;
-  startNewSeason: () => {
-    retirementMoves: MarketMove[];
-    marketMoves: MarketMove[];
-    newCarChanges: Array<{ teamId: string; before: Team['car']; after: Team['car'] }>;
-  };
+  advanceSeason: () => PreseasonData;   // end-of-year transition: archive, market, new cars
+  startNewYear: () => void;             // commits the new year, returns to menu
+  returnToMenu: () => void;             // exit a race weekend mid-flow (cancel)
   // utility
   resetGame: (seed?: number) => void;
 }
@@ -32,6 +29,13 @@ const GameContext = createContext<GameContextValue | null>(null);
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SeasonState>(() => createNewSeason());
+
+  const startRaceWeekend = useCallback(() => {
+    state.phase = 'pre_race';
+    state.lastQualiResult = undefined;
+    state.lastRaceResult = undefined;
+    setState({ ...state });
+  }, [state]);
 
   const runQualifying = useCallback((): QualifyingResult => {
     const rng = new RNG();
@@ -42,52 +46,71 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
     applyQualiResult(state, result.poleDriverId);
     state.lastQualiResult = result;
-    state.phase = 'qualifying_results';
+    // The UI's tick reveal will step through Q1 ticks first, then user clicks "Run Q2",
+    // then Q2 ticks reveal. We don't split simulation — both runs in one go — but the
+    // UI gates the Q2 reveal behind a button. Internally the result has all 6 ticks.
+    state.phase = 'qualifying_q1';
     setState({ ...state });
     return result;
   }, [state]);
 
-  const runRace = useCallback((): RaceResult => {
+  const startRace = useCallback((): RaceResult => {
     const rng = new RNG();
     const gp = state.calendar[state.currentRound - 1];
-    if (!state.lastQualiResult) {
-      throw new Error('Run qualifying first');
-    }
+    if (!state.lastQualiResult) throw new Error('Run qualifying first');
     const result = simulateRace(
       gp, state.lastQualiResult, state.teams, state.drivers,
       state.engineeringDirectors, state.raceDirectors, rng
     );
-    applyRaceResult(state, result);
     state.lastRaceResult = result;
     state.phase = 'race_results';
     setState({ ...state });
     return result;
   }, [state]);
 
-  const advanceToNextGP = useCallback(() => {
+  const advanceToQ2 = useCallback(() => {
+    state.phase = 'qualifying_q2';
+    setState({ ...state });
+  }, [state]);
+
+  const finishCurrentRace = useCallback(() => {
+    if (!state.lastRaceResult || !state.lastQualiResult) return;
+    applyRaceResult(state, state.lastRaceResult);
+    state.completedRaces[state.currentRound] = {
+      qualifying: state.lastQualiResult,
+      race: state.lastRaceResult,
+    };
     if (state.currentRound < state.calendar.length) {
       state.currentRound++;
-      state.phase = 'pre_race';
+      state.phase = 'menu';
       state.lastQualiResult = undefined;
       state.lastRaceResult = undefined;
+      setState({ ...state });
     } else {
-      state.phase = 'season_summary';
+      // Last race of season — auto-trigger season advance
+      const rng = new RNG();
+      advanceToNewSeason(state, rng);
+      setState({ ...state });
     }
-    setState({ ...state });
   }, [state]);
 
-  const finishSeason = useCallback((): SeasonSummary => {
-    state.phase = 'season_summary';
-    setState({ ...state });
-    return buildSeasonSummary(state);
-  }, [state]);
-
-  const startNewSeason = useCallback(() => {
+  const advanceSeason = useCallback((): PreseasonData => {
     const rng = new RNG();
     const result = advanceToNewSeason(state, rng);
-    state.phase = 'season_start';
     setState({ ...state });
     return result;
+  }, [state]);
+
+  const startNewYear = useCallback(() => {
+    state.phase = 'menu';
+    setState({ ...state });
+  }, [state]);
+
+  const returnToMenu = useCallback(() => {
+    state.phase = 'menu';
+    state.lastQualiResult = undefined;
+    state.lastRaceResult = undefined;
+    setState({ ...state });
   }, [state]);
 
   const resetGame = useCallback((seed?: number) => {
@@ -96,8 +119,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   return (
     <GameContext.Provider value={{
-      state, runQualifying, runRace, advanceToNextGP,
-      finishSeason, startNewSeason, resetGame,
+      state, startRaceWeekend, runQualifying, advanceToQ2, startRace, finishCurrentRace,
+      advanceSeason, startNewYear, returnToMenu, resetGame,
     }}>
       {children}
     </GameContext.Provider>

@@ -1,7 +1,7 @@
 import {
   Driver, Team, EngineeringDirector, RaceDirector,
   SeasonState, GamePhase, Rarity, POOL_RARITY_TARGETS,
-  RaceResult,
+  RaceResult, PreseasonData, DriverYearRecord,
 } from './types';
 import {
   createDriver, createEngineeringDirector, createRaceDirector,
@@ -9,7 +9,6 @@ import {
   generateRaceDirectorPool, rollCarStats,
 } from './generators';
 import { runDraft, applyEngDirectorsToCars, runInitialAssignment } from './market';
-import { MarketMove } from './market';
 import { RNG } from './rng';
 
 // ============================================================================
@@ -46,14 +45,18 @@ export function createNewSeason(seed?: number): SeasonState {
     teams,
     engineeringDirectors: engDirectors,
     raceDirectors,
+    retiredDrivers: [],
+    retiredEngDirectors: [],
+    retiredRaceDirectors: [],
     calendar,
     currentRound: 1,
-    phase: 'season_start',
+    phase: 'menu',
     driverStandings: drivers.map(d => ({ driverId: d.id, points: 0 })),
     teamStandings: teams.map(t => ({ teamId: t.id, points: 0 })),
     freeAgentDriverIds: draftResult.freeAgentDriverIds,
     freeAgentEngDirectorIds: draftResult.freeAgentEngDirectorIds,
     freeAgentRaceDirectorIds: draftResult.freeAgentRaceDirectorIds,
+    completedRaces: {},
   };
 }
 
@@ -90,19 +93,27 @@ export function applyRaceResult(state: SeasonState, result: RaceResult): void {
     }
   }
 
-  // Wins / podiums
+  // Wins / podiums (driver + team aggregate)
   for (let i = 0; i < Math.min(3, result.finalRanking.length); i++) {
     const id = result.finalRanking[i];
     if (result.dnfs.includes(id)) continue;
     const d = driverMap.get(id);
     if (!d) continue;
+    const t = teamByDriver.get(id);
     if (i === 0) {
       d.seasonWins++;
-      d.careerWins++; // permanent counter, never reset
-      const t = teamByDriver.get(id);
-      if (t) t.seasonWins++;
+      d.careerWins++;
+      if (t) {
+        t.seasonWins++;
+        t.careerWins++;
+      }
     }
     d.seasonPodiums++;
+    d.careerPodiums++;
+    if (t) {
+      t.seasonPodiums++;
+      t.careerPodiums++;
+    }
   }
 
   // Race starts (counts everyone who lined up)
@@ -127,10 +138,21 @@ export function applyRaceResult(state: SeasonState, result: RaceResult): void {
   recalcStandings(state);
 }
 
-// Apply pole position points (just stats, no championship points for pole in F1)
+// Apply pole position: driver + team stat tracking (no points in F1, pole is prestige).
 export function applyQualiResult(state: SeasonState, poleDriverId: string): void {
   const d = state.drivers.find(x => x.id === poleDriverId);
-  if (d) d.seasonPoles++;
+  if (d) {
+    d.seasonPoles++;
+    d.careerPoles++;
+  }
+  // Also credit the team
+  const team = state.teams.find(t =>
+    t.driver1Id === poleDriverId || t.driver2Id === poleDriverId || t.testDriverId === poleDriverId
+  );
+  if (team) {
+    team.seasonPoles++;
+    team.careerPoles++;
+  }
 }
 
 // Decrement injury counters at the start of each GP
@@ -178,53 +200,197 @@ export function buildSeasonSummary(state: SeasonState): SeasonSummary {
   };
 }
 
-// Advance to a new season: age everyone, retire those past retirement, generate replacements,
-// re-roll cars with random factor, run market draft.
-export function advanceToNewSeason(state: SeasonState, rng: RNG): {
-  retirementMoves: MarketMove[];
-  marketMoves: MarketMove[];
-  newCarChanges: Array<{ teamId: string; before: Team['car']; after: Team['car'] }>;
-} {
-  const retirementMoves: MarketMove[] = [];
+// Snapshot one year's record onto every driver, team, and director's yearHistory.
+// MUST be called BEFORE seasonal stats get reset.
+function snapshotYearHistory(
+  state: SeasonState,
+  championDriverId: string | undefined,
+  constructorChampTeamId: string | undefined,
+): void {
+  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
+  const teamByDriver = new Map<string, Team>();
+  const teamByEng = new Map<string, Team>();
+  const teamByRace = new Map<string, Team>();
+  for (const t of state.teams) {
+    if (t.driver1Id) teamByDriver.set(t.driver1Id, t);
+    if (t.driver2Id) teamByDriver.set(t.driver2Id, t);
+    if (t.testDriverId) teamByDriver.set(t.testDriverId, t);
+    if (t.engDirectorId) teamByEng.set(t.engDirectorId, t);
+    if (t.raceDirectorId) teamByRace.set(t.raceDirectorId, t);
+  }
+  const finalDriverStandingsByPos = state.driverStandings;
+  const finalTeamStandingsByPos = state.teamStandings;
 
-  // Champion gets a championship credit
+  // ---- Drivers ----
+  for (const d of state.drivers) {
+    const team = teamByDriver.get(d.id) ?? null;
+    let position: DriverYearRecord['position'] = 'free_agent';
+    if (team) {
+      if (team.driver1Id === d.id) position = 'driver1';
+      else if (team.driver2Id === d.id) position = 'driver2';
+      else if (team.testDriverId === d.id) position = 'testDriver';
+    }
+    // Approximate races participated: career starts is cumulative — we use the count
+    // of races this year as: full calendar length if not on test driver, minus injured races.
+    // For test drivers we use 0 unless they filled in for an injured regular (which we
+    // didn't track granularly). Good-enough approximation:
+    const racesThisYear = position === 'driver1' || position === 'driver2'
+      ? state.calendar.length
+      : 0;
+    d.yearHistory.push({
+      year: state.year,
+      teamId: team?.id ?? null,
+      teamName: team?.name ?? '—',
+      position,
+      races: racesThisYear,
+      wins: d.seasonWins,
+      podiums: d.seasonPodiums,
+      poles: d.seasonPoles,
+      fastestLaps: d.seasonFastestLaps,
+      points: d.seasonPoints,
+      isWorldChampion: d.id === championDriverId,
+      rarityAtTime: d.rarity,
+    });
+  }
+
+  // ---- Teams ----
+  for (const t of state.teams) {
+    const standingPos = finalTeamStandingsByPos.findIndex(s => s.teamId === t.id) + 1;
+    const isConstructorChamp = t.id === constructorChampTeamId;
+    const driverChamp = championDriverId !== undefined && (
+      t.driver1Id === championDriverId || t.driver2Id === championDriverId || t.testDriverId === championDriverId
+    );
+    if (isConstructorChamp) t.careerConstructorWC++;
+    if (driverChamp) t.careerDriverWC++;
+    const carAvg = (t.car.maxSpeed + t.car.acceleration + t.car.turning + t.car.reliability) / 4;
+    t.yearHistory.push({
+      year: state.year,
+      finalPosition: standingPos || finalTeamStandingsByPos.length,
+      points: t.seasonPoints,
+      wins: t.seasonWins,
+      podiums: t.seasonPodiums,
+      poles: t.seasonPoles,
+      driverWC: driverChamp,
+      constructorWC: isConstructorChamp,
+      carAvg,
+      driver1Id: t.driver1Id,
+      driver2Id: t.driver2Id,
+      testDriverId: t.testDriverId,
+      engDirectorId: t.engDirectorId,
+      raceDirectorId: t.raceDirectorId,
+    });
+  }
+
+  // ---- Directors ----
+  // For each director, find their team this year and capture team's stats.
+  // This is what powers "wins on teams they were part of" in the Directors history view.
+  for (const eng of state.engineeringDirectors) {
+    const team = teamByEng.get(eng.id);
+    eng.yearHistory.push({
+      year: state.year,
+      teamId: team?.id ?? null,
+      teamName: team?.name ?? '—',
+      teamRaceWins: team?.seasonWins ?? 0,
+      teamPodiums: team?.seasonPodiums ?? 0,
+      teamPoles: team?.seasonPoles ?? 0,
+      driverWC: team !== undefined && championDriverId !== undefined &&
+        (team.driver1Id === championDriverId || team.driver2Id === championDriverId || team.testDriverId === championDriverId),
+      constructorWC: team?.id === constructorChampTeamId,
+      rarityAtTime: eng.rarity,
+    });
+  }
+  for (const rd of state.raceDirectors) {
+    const team = teamByRace.get(rd.id);
+    rd.yearHistory.push({
+      year: state.year,
+      teamId: team?.id ?? null,
+      teamName: team?.name ?? '—',
+      teamRaceWins: team?.seasonWins ?? 0,
+      teamPodiums: team?.seasonPodiums ?? 0,
+      teamPoles: team?.seasonPoles ?? 0,
+      driverWC: team !== undefined && championDriverId !== undefined &&
+        (team.driver1Id === championDriverId || team.driver2Id === championDriverId || team.testDriverId === championDriverId),
+      constructorWC: team?.id === constructorChampTeamId,
+      rarityAtTime: rd.rarity,
+    });
+  }
+  // Suppress unused-param warning
+  void driverMap;
+  void finalDriverStandingsByPos;
+}
+
+// Advance to a new season: snapshots year history, archives retirees, generates rookies,
+// re-rolls cars, runs market. Returns rich PreseasonData for the UI.
+export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData {
+  // ---- 1) Recalc final standings (before any reset) ----
   recalcStandings(state);
-  const champId = state.driverStandings[0]?.driverId;
-  if (champId) {
-    const champ = state.drivers.find(d => d.id === champId);
+  const championDriverId = state.driverStandings[0]?.driverId;
+  const constructorChampTeamId = state.teamStandings[0]?.teamId;
+
+  // ---- 2) Credit the champion ----
+  if (championDriverId) {
+    const champ = state.drivers.find(d => d.id === championDriverId);
     if (champ) champ.careerChampionships++;
   }
 
-  // Age everyone and detect retirements
+  // ---- 3) Snapshot year history BEFORE any retirement or stat reset ----
+  snapshotYearHistory(state, championDriverId, constructorChampTeamId);
+
+  // ---- 4) Build the preseason summary data (uses current pre-reset state) ----
+  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
+  const teamMap = new Map(state.teams.map(t => [t.id, t]));
+  const teamByDriver = new Map<string, Team>();
+  for (const t of state.teams) {
+    if (t.driver1Id) teamByDriver.set(t.driver1Id, t);
+    if (t.driver2Id) teamByDriver.set(t.driver2Id, t);
+    if (t.testDriverId) teamByDriver.set(t.testDriverId, t);
+  }
+  const championDriver = championDriverId ? driverMap.get(championDriverId) : undefined;
+  const mostWinsDriver = state.drivers.slice().sort((a, b) => b.seasonWins - a.seasonWins)[0];
+  const rookies = state.drivers.filter(d => d.age - d.careerStartAge === 0);
+  const roy = rookies.length
+    ? rookies.slice().sort((a, b) => b.seasonPoints - a.seasonPoints)[0]
+    : null;
+  const finalDriverStandings = state.driverStandings.map(s => {
+    const d = driverMap.get(s.driverId)!;
+    const team = teamByDriver.get(d.id);
+    return {
+      driverId: s.driverId,
+      driverName: d.name,
+      teamName: team?.name ?? '—',
+      points: s.points,
+      wins: d.seasonWins,
+    };
+  });
+  const finalTeamStandings = state.teamStandings.map(s => ({
+    teamId: s.teamId,
+    teamName: teamMap.get(s.teamId)?.name ?? '—',
+    points: s.points,
+    wins: teamMap.get(s.teamId)?.seasonWins ?? 0,
+  }));
+
+  // ---- 5) Age everyone and detect retirements ----
   const retiringDriverIds = new Set<string>();
+  const retirements: PreseasonData['retirements'] = [];
   for (const d of state.drivers) {
     d.age++;
     if (d.age > d.retirementAge) {
       retiringDriverIds.add(d.id);
-      retirementMoves.push({
-        kind: 'driver_retired',
-        entityName: d.name,
-        entityRarity: d.rarity,
-      });
+      d.retired = true;
+      retirements.push({ name: d.name, rarity: d.rarity, kind: 'driver' });
     } else if (d.age === d.retirementAge && !d.retirementAnnounced) {
       d.retirementAnnounced = true;
-      // Note: announcement appears in market UI but not as a move
     }
   }
 
-  // Directors: decrement remaining years
   const retiringEngIds = new Set<string>();
   for (const e of state.engineeringDirectors) {
     e.age++;
     e.yearsRemaining--;
     if (e.yearsRemaining <= 0) {
       retiringEngIds.add(e.id);
-      retirementMoves.push({
-        kind: 'director_retired',
-        entityName: e.name,
-        entityRarity: e.rarity,
-        position: 'engDirector',
-      });
+      e.retired = true;
+      retirements.push({ name: e.name, rarity: e.rarity, kind: 'engDirector' });
     }
   }
   const retiringRaceIds = new Set<string>();
@@ -233,16 +399,15 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): {
     r.yearsRemaining--;
     if (r.yearsRemaining <= 0) {
       retiringRaceIds.add(r.id);
-      retirementMoves.push({
-        kind: 'director_retired',
-        entityName: r.name,
-        entityRarity: r.rarity,
-        position: 'raceDirector',
-      });
+      r.retired = true;
+      retirements.push({ name: r.name, rarity: r.rarity, kind: 'raceDirector' });
     }
   }
 
-  // Remove retired drivers/directors from pools and from teams
+  // ---- 6) Move retirees to archives (kept forever for History tab) ----
+  state.retiredDrivers.push(...state.drivers.filter(d => retiringDriverIds.has(d.id)));
+  state.retiredEngDirectors.push(...state.engineeringDirectors.filter(e => retiringEngIds.has(e.id)));
+  state.retiredRaceDirectors.push(...state.raceDirectors.filter(r => retiringRaceIds.has(r.id)));
   state.drivers = state.drivers.filter(d => !retiringDriverIds.has(d.id));
   state.engineeringDirectors = state.engineeringDirectors.filter(e => !retiringEngIds.has(e.id));
   state.raceDirectors = state.raceDirectors.filter(r => !retiringRaceIds.has(r.id));
@@ -256,64 +421,39 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): {
     if (t.raceDirectorId && retiringRaceIds.has(t.raceDirectorId)) t.raceDirectorId = null;
   }
 
-  // FIRING UNDERPERFORMERS:
-  // Bottom-3-finishing drivers on each team risk being released if their team finished poorly
-  // and they weren't the better driver. We keep this simple for now: each team releases
-  // their lowest-scoring driver if the team finished outside the top 8.
+  // ---- 7) Fire underperformers ----
+  const releases: PreseasonData['releases'] = [];
   const teamStandingsRanked = state.teams.slice().sort((a, b) => b.seasonPoints - a.seasonPoints);
   for (let i = 8; i < teamStandingsRanked.length; i++) {
     const t = teamStandingsRanked[i];
     const d1 = t.driver1Id ? state.drivers.find(d => d.id === t.driver1Id) : null;
     const d2 = t.driver2Id ? state.drivers.find(d => d.id === t.driver2Id) : null;
     if (d1 && d2) {
-      // Release whichever scored less - but only if they aren't legends (legends are safe)
       const weaker = d1.seasonPoints < d2.seasonPoints ? d1 : d2;
       if (weaker.rarity !== 'legend' && rng.chance(0.6)) {
         if (t.driver1Id === weaker.id) t.driver1Id = null;
         if (t.driver2Id === weaker.id) t.driver2Id = null;
-        retirementMoves.push({
-          kind: 'driver_released',
-          entityName: weaker.name,
-          entityRarity: weaker.rarity,
-          fromTeam: t.name,
-        });
+        releases.push({ name: weaker.name, rarity: weaker.rarity, fromTeam: t.name, kind: 'driver' });
       }
     }
-    // Bottom-4 teams may also fire a director (not legends, lower chance for engineering since
-    // they're harder to replace and we want some stability)
-    if (i >= 8) {
-      // Engineering director: 30% release chance if not legend
-      if (t.engDirectorId) {
-        const eng = state.engineeringDirectors.find(e => e.id === t.engDirectorId);
-        if (eng && eng.rarity !== 'legend' && rng.chance(0.30)) {
-          t.engDirectorId = null;
-          retirementMoves.push({
-            kind: 'director_released',
-            entityName: eng.name,
-            entityRarity: eng.rarity,
-            fromTeam: t.name,
-            position: 'engDirector',
-          });
-        }
+    // Director firing
+    if (t.engDirectorId) {
+      const eng = state.engineeringDirectors.find(e => e.id === t.engDirectorId);
+      if (eng && eng.rarity !== 'legend' && rng.chance(0.30)) {
+        t.engDirectorId = null;
+        releases.push({ name: eng.name, rarity: eng.rarity, fromTeam: t.name, kind: 'engDirector' });
       }
-      // Race director: 40% release chance if not legend (race strategy is more visibly blameable)
-      if (t.raceDirectorId) {
-        const rd = state.raceDirectors.find(r => r.id === t.raceDirectorId);
-        if (rd && rd.rarity !== 'legend' && rng.chance(0.40)) {
-          t.raceDirectorId = null;
-          retirementMoves.push({
-            kind: 'director_released',
-            entityName: rd.name,
-            entityRarity: rd.rarity,
-            fromTeam: t.name,
-            position: 'raceDirector',
-          });
-        }
+    }
+    if (t.raceDirectorId) {
+      const rd = state.raceDirectors.find(r => r.id === t.raceDirectorId);
+      if (rd && rd.rarity !== 'legend' && rng.chance(0.40)) {
+        t.raceDirectorId = null;
+        releases.push({ name: rd.name, rarity: rd.rarity, fromTeam: t.name, kind: 'raceDirector' });
       }
     }
   }
 
-  // Reset season-only stats on everyone
+  // ---- 8) Reset season-only stats ----
   for (const d of state.drivers) {
     d.seasonWins = 0;
     d.seasonPodiums = 0;
@@ -324,23 +464,19 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): {
   for (const t of state.teams) {
     t.seasonPoints = 0;
     t.seasonWins = 0;
+    t.seasonPodiums = 0;
+    t.seasonPoles = 0;
   }
 
-  // Generate new rookies: fill the pool back to 40
-  // The replacement rarity follows the pool target distribution
+  // ---- 9) Generate new rookies and replacement directors ----
+  const rookieArrivals: PreseasonData['rookieArrivals'] = [];
   while (state.drivers.length < 40) {
     const rarity = nextRarityToFill(state.drivers, rng);
     const newDriver = createDriver(rng, rarity);
-    // Brand new rookies are age 23
     newDriver.age = 23;
     state.drivers.push(newDriver);
-    retirementMoves.push({
-      kind: 'rookie_arrived',
-      entityName: newDriver.name,
-      entityRarity: newDriver.rarity,
-    });
+    rookieArrivals.push({ name: newDriver.name, rarity: newDriver.rarity });
   }
-  // Generate new directors to keep pools at size 20
   while (state.engineeringDirectors.length < 20) {
     const rarity = nextDirectorRarityToFill(state.engineeringDirectors.map(e => e.rarity), rng);
     state.engineeringDirectors.push(createEngineeringDirector(rng, rarity));
@@ -350,30 +486,24 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): {
     state.raceDirectors.push(createRaceDirector(rng, rarity));
   }
 
-  // Re-roll cars with year-to-year variation
-  const newCarChanges: Array<{ teamId: string; before: Team['car']; after: Team['car'] }> = [];
+  // ---- 10) Re-roll cars ----
+  const carEvolution: PreseasonData['carEvolution'] = [];
   for (const t of state.teams) {
     const before = { ...t.car };
-    // The team's "true legacy" for this year drifts by ±2 from base.
-    // Bottom (65) can fall to 63 or rise to 67; top (85) similar swing.
     const drift = rng.int(-2, 2);
     const yearLegacy = Math.max(50, Math.min(95, t.legacyBaseValue + drift));
     t.car = rollCarStats(rng, yearLegacy);
-    newCarChanges.push({ teamId: t.id, before, after: { ...t.car } });
+    carEvolution.push({
+      teamId: t.id,
+      teamName: t.name,
+      teamColor: t.color,
+      before,
+      after: { ...t.car },
+    });
   }
 
-  // Compute previous standings for draft order (worst first)
-  const standingsWorstFirst = state.teams
-    .slice()
-    .sort((a, b) => {
-      // We already reset season points - so use the pre-reset standings we cached.
-      return 0;
-    })
-    .map(t => t.id);
-  // Actually use the pre-reset standings: rebuild from teamStandings before reset
+  // ---- 11) Run draft (worst-first based on the just-finished standings) ----
   const worstFirst = state.teamStandings.slice().reverse().map(s => s.teamId);
-
-  // Mark all unassigned drivers/directors as free agents
   const assignedDriverIds = new Set<string>();
   const assignedEngIds = new Set<string>();
   const assignedRaceIds = new Set<string>();
@@ -388,34 +518,63 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): {
   const freeEng = state.engineeringDirectors.filter(e => !assignedEngIds.has(e.id)).map(e => e.id);
   const freeRace = state.raceDirectors.filter(r => !assignedRaceIds.has(r.id)).map(r => r.id);
 
-  // Run the draft to fill all vacancies
   const draft = runDraft({
     teams: state.teams,
     drivers: state.drivers,
     engDirectors: state.engineeringDirectors,
     raceDirectors: state.raceDirectors,
-    previousStandingsWorstFirst: worstFirst.length === state.teams.length ? worstFirst : standingsWorstFirst,
+    previousStandingsWorstFirst: worstFirst,
     freeAgentDriverIds: freeDrivers,
     freeAgentEngDirectorIds: freeEng,
     freeAgentRaceDirectorIds: freeRace,
   }, rng);
 
+  const signings: PreseasonData['signings'] = draft.moves
+    .filter(m => m.kind === 'driver_signed' || m.kind === 'director_signed')
+    .map(m => ({
+      name: m.entityName,
+      rarity: m.entityRarity!,
+      toTeam: m.toTeam!,
+      position: m.position ?? '',
+    }));
+
   state.freeAgentDriverIds = draft.freeAgentDriverIds;
   state.freeAgentEngDirectorIds = draft.freeAgentEngDirectorIds;
   state.freeAgentRaceDirectorIds = draft.freeAgentRaceDirectorIds;
 
-  // Apply eng director boosts to cars
+  // ---- 12) Apply eng director boosts to new cars ----
   applyEngDirectorsToCars(state.teams, state.engineeringDirectors);
 
-  // Generate a new calendar (weather re-rolls)
+  // ---- 13) Bump year, generate new calendar ----
   state.calendar = createCalendar(rng);
   state.currentRound = 1;
   state.year++;
-  state.phase = 'season_start';
+  state.completedRaces = {};
+  state.lastQualiResult = undefined;
+  state.lastRaceResult = undefined;
+  state.phase = 'preseason';
 
   recalcStandings(state);
 
-  return { retirementMoves, marketMoves: draft.moves, newCarChanges };
+  // ---- 14) Build and cache PreseasonData ----
+  const preseasonData: PreseasonData = {
+    yearEnded: state.year - 1,
+    championDriverId: championDriverId ?? '',
+    championDriverName: championDriver?.name ?? '—',
+    constructorChampionTeamId: constructorChampTeamId ?? '',
+    mostWinsDriverId: mostWinsDriver?.id ?? '',
+    rookieOfYearDriverId: roy?.id ?? null,
+    finalDriverStandings,
+    finalTeamStandings,
+    retirements,
+    rookieArrivals,
+    signings,
+    releases,
+    carEvolution,
+  };
+  state.lastPreseasonData = preseasonData;
+
+  return preseasonData;
 }
 
 // Decide which rarity to add when replacing a retired driver, keeping pool balanced

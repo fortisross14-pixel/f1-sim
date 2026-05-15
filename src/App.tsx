@@ -1,22 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { GameProvider, useGame } from './GameContext';
-import { Driver, Team } from './sim/types';
+import {
+  Driver, Team, EngineeringDirector, RaceDirector,
+  PreseasonData, Rarity, DriverYearRecord, DirectorYearRecord, TeamYearRecord,
+} from './sim/types';
 import { effectiveDriverSkills } from './sim/generators';
-import { remainingPoints, carPointCost, MarketMove } from './sim/market';
-import { SeasonSummary } from './sim/season';
+import { remainingPoints, carPointCost } from './sim/market';
 
 import './App.css';
 
+// ============================================================================
+// TOP-LEVEL APP
+// ============================================================================
 export default function App() {
   return (
     <GameProvider>
-      <GameShell />
+      <Shell />
     </GameProvider>
   );
 }
 
-function GameShell() {
+function Shell() {
   const { state } = useGame();
+  // If we're inside a race weekend (qualifying/race), show the race flow overlay.
+  // Otherwise show the persistent tabbed menu.
+  if (state.phase === 'pre_race' || state.phase === 'qualifying_q1' ||
+      state.phase === 'qualifying_q2' || state.phase === 'race_results') {
+    return <RaceWeekendOverlay />;
+  }
+  return <Menu />;
+}
+
+// ============================================================================
+// MAIN MENU - persistent top-level tabs
+// ============================================================================
+type TopTab = 'wc' | 'pilots' | 'teams' | 'history';
+
+function Menu() {
+  const { state } = useGame();
+  const [tab, setTab] = useState<TopTab>('wc');
+
   return (
     <div className="app">
       <header className="header">
@@ -24,192 +47,846 @@ function GameShell() {
         <div className="header-info">
           <span>Year {state.year}</span>
           <span>Round {state.currentRound} / {state.calendar.length}</span>
-          <span>Phase: {state.phase}</span>
         </div>
       </header>
+      <nav className="top-tabs">
+        <button onClick={() => setTab('wc')} className={tab === 'wc' ? 'active' : ''}>World Championship</button>
+        <button onClick={() => setTab('pilots')} className={tab === 'pilots' ? 'active' : ''}>Pilots</button>
+        <button onClick={() => setTab('teams')} className={tab === 'teams' ? 'active' : ''}>Teams</button>
+        <button onClick={() => setTab('history')} className={tab === 'history' ? 'active' : ''}>History</button>
+      </nav>
       <main>
-        <Router />
+        {tab === 'wc' && <WorldChampionshipTab />}
+        {tab === 'pilots' && <PilotsTab />}
+        {tab === 'teams' && <TeamsTab />}
+        {tab === 'history' && <HistoryTab />}
       </main>
     </div>
   );
 }
 
-function Router() {
+// ============================================================================
+// WORLD CHAMPIONSHIP TAB
+// ============================================================================
+function WorldChampionshipTab() {
   const { state } = useGame();
-  switch (state.phase) {
-    case 'season_start':       return <SeasonStartScreen />;
-    case 'pre_race':           return <PreRaceScreen />;
-    case 'qualifying_results': return <QualiResultsScreen />;
-    case 'race_results':       return <RaceResultsScreen />;
-    case 'season_summary':     return <SeasonSummaryScreen />;
-    default:                   return <SeasonStartScreen />;
-  }
-}
-
-// ============================================================================
-// SEASON START - shows teams, rosters, calendar
-// ============================================================================
-function SeasonStartScreen() {
-  const { state, advanceToNextGP } = useGame();
-  const [tab, setTab] = useState<'teams' | 'pool' | 'calendar'>('teams');
+  const [sub, setSub] = useState<'current' | 'preseason'>(state.phase === 'preseason' ? 'preseason' : 'current');
+  // If user enters preseason via end-of-season, auto-switch to preseason sub-tab.
+  useEffect(() => {
+    if (state.phase === 'preseason') setSub('preseason');
+  }, [state.phase]);
 
   return (
     <div className="screen">
-      <h2>Season {state.year}</h2>
-      <div className="tabs">
-        <button onClick={() => setTab('teams')} className={tab === 'teams' ? 'active' : ''}>Teams</button>
-        <button onClick={() => setTab('pool')} className={tab === 'pool' ? 'active' : ''}>Driver Pool</button>
-        <button onClick={() => setTab('calendar')} className={tab === 'calendar' ? 'active' : ''}>Calendar</button>
-      </div>
-      {tab === 'teams' && <TeamsView />}
-      {tab === 'pool' && <DriverPoolView />}
-      {tab === 'calendar' && <CalendarView />}
-      <div className="actions">
-        <button className="primary" onClick={() => { advanceToNextGP(); }}>
-          Start Season → Round 1
+      <div className="sub-tabs">
+        <button onClick={() => setSub('current')} className={sub === 'current' ? 'active' : ''}>Current</button>
+        <button onClick={() => setSub('preseason')} className={sub === 'preseason' ? 'active' : ''} disabled={!state.lastPreseasonData}>
+          Pre-season
         </button>
       </div>
+      {sub === 'current' && <WCCurrentView />}
+      {sub === 'preseason' && state.lastPreseasonData && <WCPreseasonView data={state.lastPreseasonData} />}
+      {sub === 'preseason' && !state.lastPreseasonData && (
+        <p className="muted">No pre-season data yet — finish a season to see retirements, market moves, and car changes.</p>
+      )}
     </div>
   );
 }
 
-function TeamsView() {
+function WCCurrentView() {
+  const { state, startRaceWeekend, startNewYear } = useGame();
+  const driverMap = useMemo(() => allDriversMap(state), [state]);
+  const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
+  const teamByDriver = useMemo(() => teamByDriverMap(state.teams), [state.teams]);
+  const [popupDriver, setPopupDriver] = useState<Driver | null>(null);
+  const [popupTeam, setPopupTeam] = useState<Team | null>(null);
+
+  const isPreseason = state.phase === 'preseason';
+  const seasonComplete = state.currentRound > state.calendar.length || isPreseason;
+
+  return (
+    <>
+      <div className="wc-header">
+        <h2>Year {state.year} — World Championship</h2>
+        {!seasonComplete && (
+          <button className="primary big" onClick={() => startRaceWeekend()}>Run next race →</button>
+        )}
+        {isPreseason && (
+          <button className="primary big" onClick={() => startNewYear()}>Begin Year {state.year} →</button>
+        )}
+      </div>
+
+      <h3>Calendar &amp; results</h3>
+      <table className="data-table">
+        <thead>
+          <tr><th>#</th><th>Circuit</th><th>Country</th><th>Profile</th><th>Weather</th><th>Pole</th><th>Winner</th><th>Fastest lap</th></tr>
+        </thead>
+        <tbody>
+          {state.calendar.map((gp) => {
+            const completed = state.completedRaces[gp.round];
+            const isCurrent = gp.round === state.currentRound && !seasonComplete;
+            const poleId = completed?.qualifying.poleDriverId;
+            const winnerId = completed?.race.finalRanking[0];
+            const flId = completed?.race.fastestLapDriverId;
+            return (
+              <tr key={gp.circuit.id} className={isCurrent ? 'current' : ''}>
+                <td>{gp.round}</td>
+                <td>{gp.circuit.name}</td>
+                <td>{gp.circuit.country}</td>
+                <td>{gp.circuit.profile}</td>
+                <td>{gp.weather}</td>
+                <td>{poleId ? <DriverLink id={poleId} onClick={d => setPopupDriver(d)} drivers={state.drivers.concat(state.retiredDrivers)} /> : (isCurrent ? '⟶ next' : '')}</td>
+                <td>{winnerId ? <DriverLink id={winnerId} onClick={d => setPopupDriver(d)} drivers={state.drivers.concat(state.retiredDrivers)} /> : ''}</td>
+                <td>{flId ? <DriverLink id={flId} onClick={d => setPopupDriver(d)} drivers={state.drivers.concat(state.retiredDrivers)} /> : ''}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      <div className="standings-side-by-side">
+        <div>
+          <h3>Driver Standings</h3>
+          <table className="data-table compact">
+            <thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Pts</th><th>W</th></tr></thead>
+            <tbody>
+              {state.driverStandings.map((s, i) => {
+                const d = driverMap.get(s.driverId);
+                const t = teamByDriver.get(s.driverId);
+                if (!d) return null;
+                return (
+                  <tr key={s.driverId}>
+                    <td>{i + 1}</td>
+                    <td><button className="link-btn" onClick={() => setPopupDriver(d)}>{d.name}</button></td>
+                    <td style={{ color: t?.color }}>{t?.shortName ?? '—'}</td>
+                    <td>{s.points}</td>
+                    <td>{d.seasonWins}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3>Constructor Standings</h3>
+          <table className="data-table compact">
+            <thead><tr><th>Pos</th><th>Team</th><th>Pts</th><th>W</th></tr></thead>
+            <tbody>
+              {state.teamStandings.map((s, i) => {
+                const t = teamMap.get(s.teamId);
+                if (!t) return null;
+                return (
+                  <tr key={s.teamId}>
+                    <td>{i + 1}</td>
+                    <td><button className="link-btn" style={{ color: t.color }} onClick={() => setPopupTeam(t)}>{t.name}</button></td>
+                    <td>{s.points}</td>
+                    <td>{t.seasonWins}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {popupDriver && <DriverDetailPopup driver={popupDriver} onClose={() => setPopupDriver(null)} />}
+      {popupTeam && <TeamDetailPopup team={popupTeam} onClose={() => setPopupTeam(null)} />}
+    </>
+  );
+}
+
+function WCPreseasonView({ data }: { data: PreseasonData }) {
+  const { state, startNewYear } = useGame();
+  const [section, setSection] = useState<'summary' | 'market' | 'cars'>('summary');
+  const isCurrentlyInPreseason = state.phase === 'preseason';
+
+  return (
+    <>
+      <div className="sub-sub-tabs">
+        <button onClick={() => setSection('summary')} className={section === 'summary' ? 'active' : ''}>Season {data.yearEnded} Summary</button>
+        <button onClick={() => setSection('market')} className={section === 'market' ? 'active' : ''}>Market</button>
+        <button onClick={() => setSection('cars')} className={section === 'cars' ? 'active' : ''}>Car Evolution</button>
+      </div>
+      {section === 'summary' && <PreseasonSummary data={data} />}
+      {section === 'market' && <PreseasonMarket data={data} />}
+      {section === 'cars' && <PreseasonCars data={data} />}
+      {isCurrentlyInPreseason && (
+        <div className="actions">
+          <button className="primary big" onClick={() => startNewYear()}>Begin Year {state.year} →</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PreseasonSummary({ data }: { data: PreseasonData }) {
+  return (
+    <>
+      <div className="awards">
+        <div>🏆 World Champion: <strong>{data.championDriverName}</strong></div>
+        <div>🏭 Constructors': <strong>{data.finalTeamStandings[0]?.teamName ?? '—'}</strong></div>
+        <div>🥇 Most wins: <strong>{data.finalDriverStandings.find(d => d.driverId === data.mostWinsDriverId)?.driverName ?? '—'}</strong></div>
+        {data.rookieOfYearDriverId && (
+          <div>🌟 Rookie of the Year: <strong>{data.finalDriverStandings.find(d => d.driverId === data.rookieOfYearDriverId)?.driverName ?? '—'}</strong></div>
+        )}
+      </div>
+      <h3>Final Driver Standings</h3>
+      <table className="data-table"><thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Points</th><th>Wins</th></tr></thead>
+        <tbody>
+          {data.finalDriverStandings.map((s, i) => (
+            <tr key={s.driverId}><td>{i + 1}</td><td>{s.driverName}</td><td>{s.teamName}</td><td>{s.points}</td><td>{s.wins}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      <h3>Final Constructor Standings</h3>
+      <table className="data-table"><thead><tr><th>Pos</th><th>Team</th><th>Points</th><th>Wins</th></tr></thead>
+        <tbody>
+          {data.finalTeamStandings.map((s, i) => (
+            <tr key={s.teamId}><td>{i + 1}</td><td>{s.teamName}</td><td>{s.points}</td><td>{s.wins}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function PreseasonMarket({ data }: { data: PreseasonData }) {
+  return (
+    <>
+      <h3>Retirements ({data.retirements.length})</h3>
+      <div className="market-list">
+        {data.retirements.map((r, i) => (
+          <div key={i} className="move-card">
+            <strong>⏹️ Retired</strong>
+            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
+            <div className="muted">{r.kind === 'driver' ? 'Driver' : r.kind === 'engDirector' ? 'Eng Director' : 'Race Director'}</div>
+          </div>
+        ))}
+      </div>
+      <h3>Rookies arrived ({data.rookieArrivals.length})</h3>
+      <div className="market-list">
+        {data.rookieArrivals.map((r, i) => (
+          <div key={i} className="move-card">
+            <strong>🌟 Rookie</strong>
+            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
+          </div>
+        ))}
+      </div>
+      <h3>Released ({data.releases.length})</h3>
+      <div className="market-list">
+        {data.releases.map((r, i) => (
+          <div key={i} className="move-card">
+            <strong>👋 Released</strong>
+            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
+            <div className="muted">from {r.fromTeam}</div>
+          </div>
+        ))}
+      </div>
+      <h3>Signings ({data.signings.length})</h3>
+      <div className="market-list">
+        {data.signings.map((r, i) => (
+          <div key={i} className="move-card">
+            <strong>✍️ Signed</strong>
+            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
+            <div className="muted">to {r.toTeam}</div>
+            <div className="muted">{r.position}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function PreseasonCars({ data }: { data: PreseasonData }) {
+  return (
+    <>
+      <h3>Car evolution year {data.yearEnded} → {data.yearEnded + 1}</h3>
+      <table className="data-table">
+        <thead><tr><th>Team</th><th>Speed</th><th>Accel</th><th>Turn</th><th>Reliab</th></tr></thead>
+        <tbody>
+          {data.carEvolution.map(c => (
+            <tr key={c.teamId}>
+              <td style={{ color: c.teamColor }}>{c.teamName}</td>
+              <td><Delta before={c.before.maxSpeed} after={c.after.maxSpeed} /></td>
+              <td><Delta before={c.before.acceleration} after={c.after.acceleration} /></td>
+              <td><Delta before={c.before.turning} after={c.after.turning} /></td>
+              <td><Delta before={c.before.reliability} after={c.after.reliability} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted">(Stats above are pre-engineering-director boost.)</p>
+    </>
+  );
+}
+
+function Delta({ before, after }: { before: number; after: number }) {
+  const diff = after - before;
+  return (
+    <span>{before} → <strong>{after}</strong>{' '}
+      {diff > 0 ? <span className="up">+{diff}</span> : diff < 0 ? <span className="down">{diff}</span> : <span>—</span>}
+    </span>
+  );
+}
+
+// ============================================================================
+// PILOTS TAB
+// ============================================================================
+type DriverSortKey = 'name' | 'team' | 'age' | 'rarity' | 'driving' | 'physical' | 'carSetup' | 'speed' | 'years';
+
+function PilotsTab() {
   const { state } = useGame();
-  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
-  const engMap = new Map(state.engineeringDirectors.map(e => [e.id, e]));
-  const rdMap = new Map(state.raceDirectors.map(r => [r.id, r]));
+  const [sortKey, setSortKey] = useState<DriverSortKey>('rarity');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+  const [popupDriver, setPopupDriver] = useState<Driver | null>(null);
+
+  const teamByDriver = useMemo(() => teamByDriverMap(state.teams), [state.teams]);
+  const sorted = useMemo(() => sortDrivers(state.drivers, sortKey, sortAsc, teamByDriver), [state.drivers, sortKey, sortAsc, teamByDriver]);
+
+  return (
+    <div className="screen">
+      <h2>Pilots ({state.drivers.length} active)</h2>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <SortHeader label="Name" k="name" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Team" k="team" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Yrs Active" k="years" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Age" k="age" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Rarity" k="rarity" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <th>Archetype</th>
+            <SortHeader label="D" k="driving" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="P" k="physical" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="C" k="carSetup" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="S" k="speed" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(d => {
+            const t = teamByDriver.get(d.id);
+            const sk = effectiveDriverSkills(d);
+            return (
+              <tr key={d.id}>
+                <td><button className="link-btn" onClick={() => setPopupDriver(d)}>{d.name}</button>
+                  {d.retirementAnnounced && <span className="retiring"> ⏳</span>}
+                  {d.injuredRaces > 0 && <span className="injury"> 🚑{d.injuredRaces}</span>}</td>
+                <td style={{ color: t?.color }}>{t?.name ?? <em className="muted">Free Agent</em>}</td>
+                <td>{d.age - d.careerStartAge + 1}</td>
+                <td>{d.age}</td>
+                <td><span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span></td>
+                <td>{d.archetype}</td>
+                <td>{sk.driving}</td>
+                <td>{sk.physical}</td>
+                <td>{sk.carSetup}</td>
+                <td>{sk.speed}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {popupDriver && <DriverDetailPopup driver={popupDriver} onClose={() => setPopupDriver(null)} />}
+    </div>
+  );
+}
+
+// ============================================================================
+// TEAMS TAB
+// ============================================================================
+function TeamsTab() {
+  const { state } = useGame();
+  const driverMap = useMemo(() => allDriversMap(state), [state]);
+  const engMap = useMemo(() => new Map(state.engineeringDirectors.map(e => [e.id, e])), [state.engineeringDirectors]);
+  const rdMap = useMemo(() => new Map(state.raceDirectors.map(r => [r.id, r])), [state.raceDirectors]);
+  const [popupTeam, setPopupTeam] = useState<Team | null>(null);
+  const [popupDriver, setPopupDriver] = useState<Driver | null>(null);
+  const [popupEng, setPopupEng] = useState<EngineeringDirector | null>(null);
+  const [popupRD, setPopupRD] = useState<RaceDirector | null>(null);
+
   const sorted = [...state.teams].sort((a, b) => {
     const aAvg = (a.car.maxSpeed + a.car.acceleration + a.car.turning + a.car.reliability) / 4;
     const bAvg = (b.car.maxSpeed + b.car.acceleration + b.car.turning + b.car.reliability) / 4;
     return bAvg - aAvg;
   });
+
   return (
-    <div className="teams-grid">
-      {sorted.map(t => {
-        const d1 = t.driver1Id ? driverMap.get(t.driver1Id) : null;
-        const d2 = t.driver2Id ? driverMap.get(t.driver2Id) : null;
-        const td = t.testDriverId ? driverMap.get(t.testDriverId) : null;
-        const eng = t.engDirectorId ? engMap.get(t.engDirectorId) : null;
-        const rd = t.raceDirectorId ? rdMap.get(t.raceDirectorId) : null;
-        const rem = remainingPoints(t, state.drivers, state.engineeringDirectors, state.raceDirectors);
-        const carPts = carPointCost(t);
-        return (
-          <div key={t.id} className="team-card" style={{ borderLeft: `4px solid ${t.color}` }}>
-            <h3>{t.name} <small>({t.shortName})</small></h3>
-            <div className="row">
-              <span>Tier: {t.tier}</span>
-              <span>Cap: {t.marketPoints}</span>
-              <span>Car cost: {carPts}</span>
-              <span>Unused: {rem}</span>
-            </div>
-            <div className="row">
-              <span>Speed: {t.car.maxSpeed}</span>
-              <span>Accel: {t.car.acceleration}</span>
-              <span>Turn: {t.car.turning}</span>
-              <span>Reliab: {t.car.reliability}</span>
-            </div>
-            <div className="roster">
-              <RosterLine label="D1" d={d1} />
-              <RosterLine label="D2" d={d2} />
-              <RosterLine label="Test" d={td} />
-              <div className="director-line">
-                Eng Dir: {eng ? `${eng.name} (${eng.rarity}) targets S${eng.speedTarget}/A${eng.accelTarget}/T${eng.turningTarget}/R${eng.reliabilityTarget} @${Math.round(eng.pullFactor * 100)}% pull` : '—'}
+    <div className="screen">
+      <h2>Teams</h2>
+      <div className="teams-grid">
+        {sorted.map(t => {
+          const d1 = t.driver1Id ? driverMap.get(t.driver1Id) : null;
+          const d2 = t.driver2Id ? driverMap.get(t.driver2Id) : null;
+          const td = t.testDriverId ? driverMap.get(t.testDriverId) : null;
+          const eng = t.engDirectorId ? engMap.get(t.engDirectorId) : null;
+          const rd = t.raceDirectorId ? rdMap.get(t.raceDirectorId) : null;
+          const rem = remainingPoints(t, state.drivers, state.engineeringDirectors, state.raceDirectors);
+          const carPts = carPointCost(t);
+          return (
+            <div key={t.id} className="team-card" style={{ borderLeft: `4px solid ${t.color}` }}>
+              <h3>
+                <button className="link-btn" style={{ color: t.color }} onClick={() => setPopupTeam(t)}>{t.name}</button>
+                <small>  ({t.shortName})</small>
+              </h3>
+              <div className="row">
+                <span>Tier: {t.tier}</span>
+                <span>Cap: {t.marketPoints}</span>
+                <span>Car: {carPts}pts</span>
+                <span>Unused: {rem}</span>
               </div>
-              <div className="director-line">
-                Race Dir: {rd ? `${rd.name} (${rd.rarity}) ${rd.timeImprovementPct}% / +${rd.reliabilityBonus}rel` : '—'}
+              <div className="row">
+                <span>Speed: {t.car.maxSpeed}</span>
+                <span>Accel: {t.car.acceleration}</span>
+                <span>Turn: {t.car.turning}</span>
+                <span>Reliab: {t.car.reliability}</span>
+              </div>
+              <div className="roster">
+                <RosterLine label="D1" d={d1} onClick={() => d1 && setPopupDriver(d1)} />
+                <RosterLine label="D2" d={d2} onClick={() => d2 && setPopupDriver(d2)} />
+                <RosterLine label="Test" d={td} onClick={() => td && setPopupDriver(td)} />
+                <div className="director-line">
+                  Eng Dir: {eng ?
+                    <><button className="link-btn" onClick={() => setPopupEng(eng)}>{eng.name}</button> <span className={`rarity rarity-${eng.rarity}`}>{eng.rarity}</span></>
+                    : '—'}
+                </div>
+                <div className="director-line">
+                  Race Dir: {rd ?
+                    <><button className="link-btn" onClick={() => setPopupRD(rd)}>{rd.name}</button> <span className={`rarity rarity-${rd.rarity}`}>{rd.rarity}</span></>
+                    : '—'}
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {popupTeam && <TeamDetailPopup team={popupTeam} onClose={() => setPopupTeam(null)} />}
+      {popupDriver && <DriverDetailPopup driver={popupDriver} onClose={() => setPopupDriver(null)} />}
+      {popupEng && <EngDirectorDetailPopup director={popupEng} onClose={() => setPopupEng(null)} />}
+      {popupRD && <RaceDirectorDetailPopup director={popupRD} onClose={() => setPopupRD(null)} />}
     </div>
   );
 }
 
-function RosterLine({ label, d }: { label: string; d: Driver | null | undefined }) {
+function RosterLine({ label, d, onClick }: { label: string; d: Driver | null | undefined; onClick?: () => void }) {
   if (!d) return <div>{label}: —</div>;
-  const skills = effectiveDriverSkills(d);
+  const sk = effectiveDriverSkills(d);
   return (
     <div className="driver-line">
-      <strong>{label}:</strong> {d.name} <span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span>
-      &nbsp;<em>{d.archetype}</em> &nbsp;age {d.age}
-      &nbsp;[D{skills.driving} P{skills.physical} C{skills.carSetup} S{skills.speed}]
+      <strong>{label}:</strong> <button className="link-btn" onClick={onClick}>{d.name}</button>{' '}
+      <span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span>{' '}
+      <em>{d.archetype}</em>{' '}
+      <span className="muted">age {d.age} · D{sk.driving} P{sk.physical} C{sk.carSetup} S{sk.speed}</span>
       {d.injuredRaces > 0 && <span className="injury"> 🚑 out {d.injuredRaces}</span>}
       {d.retirementAnnounced && <span className="retiring"> ⏳ final season</span>}
     </div>
   );
 }
 
-function DriverPoolView() {
-  const { state } = useGame();
-  const sorted = [...state.drivers].sort((a, b) => {
-    const order = { legend: 0, epic: 1, rare: 2, uncommon: 3, common: 4 } as const;
-    return order[a.rarity] - order[b.rarity];
-  });
+// ============================================================================
+// HISTORY TAB
+// ============================================================================
+type HistorySubTab = 'drivers' | 'directors' | 'teams';
+type HistoryFilter = 'active' | 'retired' | 'all';
+
+function HistoryTab() {
+  const [sub, setSub] = useState<HistorySubTab>('drivers');
   return (
-    <div>
-      <p>Total drivers: {state.drivers.length}. Free agents: {state.freeAgentDriverIds.length}</p>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Name</th><th>Rarity</th><th>Archetype</th><th>Age</th><th>D</th><th>P</th><th>C</th><th>S</th><th>Wins</th><th>Champs</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map(d => {
-            const s = effectiveDriverSkills(d);
-            return (
-              <tr key={d.id}>
-                <td>{d.name}</td>
-                <td className={`rarity rarity-${d.rarity}`}>{d.rarity}</td>
-                <td>{d.archetype}</td>
-                <td>{d.age}</td>
-                <td>{s.driving}</td>
-                <td>{s.physical}</td>
-                <td>{s.carSetup}</td>
-                <td>{s.speed}</td>
-                <td>{d.careerWins}</td>
-                <td>{d.careerChampionships}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="screen">
+      <h2>History</h2>
+      <div className="sub-tabs">
+        <button onClick={() => setSub('drivers')} className={sub === 'drivers' ? 'active' : ''}>Drivers</button>
+        <button onClick={() => setSub('directors')} className={sub === 'directors' ? 'active' : ''}>Directors</button>
+        <button onClick={() => setSub('teams')} className={sub === 'teams' ? 'active' : ''}>Teams</button>
+      </div>
+      {sub === 'drivers' && <DriverHistory />}
+      {sub === 'directors' && <DirectorHistory />}
+      {sub === 'teams' && <TeamHistory />}
     </div>
   );
 }
 
-function CalendarView() {
+type DriverHistSort = 'name' | 'rarity' | 'races' | 'wins' | 'podiums' | 'poles' | 'points' | 'championships';
+
+function DriverHistory() {
   const { state } = useGame();
+  const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [sortKey, setSortKey] = useState<DriverHistSort>('championships');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+  const [popupDriver, setPopupDriver] = useState<Driver | null>(null);
+
+  const drivers: Driver[] = filter === 'active' ? state.drivers
+    : filter === 'retired' ? state.retiredDrivers
+    : [...state.drivers, ...state.retiredDrivers];
+
+  const totalPoints = (d: Driver) => d.yearHistory.reduce((a, b) => a + b.points, 0);
+  const sorted = [...drivers].sort((a, b) => {
+    const dir = sortAsc ? 1 : -1;
+    switch (sortKey) {
+      case 'name': return dir * a.name.localeCompare(b.name);
+      case 'rarity': return dir * (rarityOrder(a.rarity) - rarityOrder(b.rarity));
+      case 'races': return dir * (a.careerStarts - b.careerStarts);
+      case 'wins': return dir * (a.careerWins - b.careerWins);
+      case 'podiums': return dir * (a.careerPodiums - b.careerPodiums);
+      case 'poles': return dir * (a.careerPoles - b.careerPoles);
+      case 'points': return dir * (totalPoints(a) - totalPoints(b));
+      case 'championships': return dir * (a.careerChampionships - b.careerChampionships);
+    }
+  });
+
   return (
-    <table className="data-table">
-      <thead>
-        <tr><th>#</th><th>Circuit</th><th>Country</th><th>Profile</th><th>Weather</th></tr>
-      </thead>
-      <tbody>
-        {state.calendar.map((gp, i) => (
-          <tr key={gp.circuit.id} className={i + 1 === state.currentRound ? 'current' : ''}>
-            <td>{gp.round}</td>
-            <td>{gp.circuit.name}</td>
-            <td>{gp.circuit.country}</td>
-            <td>{gp.circuit.profile}</td>
-            <td>{gp.weather}</td>
+    <>
+      <div className="filter-row">
+        <span>Filter: </span>
+        <button onClick={() => setFilter('active')} className={filter === 'active' ? 'active' : ''}>Active</button>
+        <button onClick={() => setFilter('retired')} className={filter === 'retired' ? 'active' : ''}>Retired</button>
+        <button onClick={() => setFilter('all')} className={filter === 'all' ? 'active' : ''}>All</button>
+      </div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <SortHeader label="Name" k="name" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Rarity" k="rarity" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <th>Status</th>
+            <SortHeader label="Races" k="races" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Wins" k="wins" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Podiums" k="podiums" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Poles" k="poles" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="Points" k="points" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
+            <SortHeader label="WC" k="championships" curr={sortKey} asc={sortAsc} onClick={k => toggleSort(k, sortKey, sortAsc, setSortKey, setSortAsc)} />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sorted.map(d => (
+            <tr key={d.id}>
+              <td><button className="link-btn" onClick={() => setPopupDriver(d)}>{d.name}</button></td>
+              <td><span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span></td>
+              <td>{d.retired ? <span className="muted">Retired</span> : 'Active'}</td>
+              <td>{d.careerStarts}</td>
+              <td>{d.careerWins}</td>
+              <td>{d.careerPodiums}</td>
+              <td>{d.careerPoles}</td>
+              <td>{totalPoints(d)}</td>
+              <td>{d.careerChampionships}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {popupDriver && <DriverDetailPopup driver={popupDriver} onClose={() => setPopupDriver(null)} />}
+    </>
+  );
+}
+
+function DirectorHistory() {
+  const { state } = useGame();
+  const [kind, setKind] = useState<'eng' | 'race'>('eng');
+  const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [popupEng, setPopupEng] = useState<EngineeringDirector | null>(null);
+  const [popupRD, setPopupRD] = useState<RaceDirector | null>(null);
+
+  const engs: EngineeringDirector[] = filter === 'active' ? state.engineeringDirectors
+    : filter === 'retired' ? state.retiredEngDirectors
+    : [...state.engineeringDirectors, ...state.retiredEngDirectors];
+  const rds: RaceDirector[] = filter === 'active' ? state.raceDirectors
+    : filter === 'retired' ? state.retiredRaceDirectors
+    : [...state.raceDirectors, ...state.retiredRaceDirectors];
+
+  const yearsActive = (h: DirectorYearRecord[]) => h.filter(y => y.teamId !== null).length;
+  const totalTeamWins = (h: DirectorYearRecord[]) => h.reduce((a, b) => a + b.teamRaceWins, 0);
+  const totalDriverWC = (h: DirectorYearRecord[]) => h.filter(y => y.driverWC).length;
+  const totalConstructorWC = (h: DirectorYearRecord[]) => h.filter(y => y.constructorWC).length;
+
+  return (
+    <>
+      <div className="filter-row">
+        <span>Type: </span>
+        <button onClick={() => setKind('eng')} className={kind === 'eng' ? 'active' : ''}>Engineering</button>
+        <button onClick={() => setKind('race')} className={kind === 'race' ? 'active' : ''}>Race</button>
+        <span style={{ marginLeft: 20 }}>Filter: </span>
+        <button onClick={() => setFilter('active')} className={filter === 'active' ? 'active' : ''}>Active</button>
+        <button onClick={() => setFilter('retired')} className={filter === 'retired' ? 'active' : ''}>Retired</button>
+        <button onClick={() => setFilter('all')} className={filter === 'all' ? 'active' : ''}>All</button>
+      </div>
+      <table className="data-table">
+        <thead><tr><th>Name</th><th>Rarity</th><th>Status</th><th>Years Active</th><th>Team Wins</th><th>Driver WC</th><th>Constructor WC</th></tr></thead>
+        <tbody>
+          {(kind === 'eng' ? engs : rds).sort((a, b) => totalTeamWins(b.yearHistory) - totalTeamWins(a.yearHistory)).map(d => (
+            <tr key={d.id}>
+              <td><button className="link-btn" onClick={() => kind === 'eng' ? setPopupEng(d as EngineeringDirector) : setPopupRD(d as RaceDirector)}>{d.name}</button></td>
+              <td><span className={`rarity rarity-${d.rarity}`}>{d.rarity}</span></td>
+              <td>{d.retired ? <span className="muted">Retired</span> : 'Active'}</td>
+              <td>{yearsActive(d.yearHistory)}</td>
+              <td>{totalTeamWins(d.yearHistory)}</td>
+              <td>{totalDriverWC(d.yearHistory)}</td>
+              <td>{totalConstructorWC(d.yearHistory)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {popupEng && <EngDirectorDetailPopup director={popupEng} onClose={() => setPopupEng(null)} />}
+      {popupRD && <RaceDirectorDetailPopup director={popupRD} onClose={() => setPopupRD(null)} />}
+    </>
+  );
+}
+
+function TeamHistory() {
+  const { state } = useGame();
+  const [popupTeam, setPopupTeam] = useState<Team | null>(null);
+  return (
+    <>
+      <table className="data-table">
+        <thead><tr><th>Team</th><th>Years</th><th>Wins</th><th>Podiums</th><th>Poles</th><th>Driver WC</th><th>Constructor WC</th></tr></thead>
+        <tbody>
+          {[...state.teams].sort((a, b) => b.careerConstructorWC - a.careerConstructorWC || b.careerWins - a.careerWins).map(t => (
+            <tr key={t.id}>
+              <td><button className="link-btn" style={{ color: t.color }} onClick={() => setPopupTeam(t)}>{t.name}</button></td>
+              <td>{t.yearHistory.length}</td>
+              <td>{t.careerWins}</td>
+              <td>{t.careerPodiums}</td>
+              <td>{t.careerPoles}</td>
+              <td>{t.careerDriverWC}</td>
+              <td>{t.careerConstructorWC}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {popupTeam && <TeamDetailPopup team={popupTeam} onClose={() => setPopupTeam(null)} />}
+    </>
   );
 }
 
 // ============================================================================
-// PRE-RACE
+// DETAIL POPUPS
 // ============================================================================
-function PreRaceScreen() {
-  const { state, runQualifying } = useGame();
-  const gp = state.calendar[state.currentRound - 1];
+function PopupShell({ title, onClose, children, accentColor }: { title: string; onClose: () => void; children: React.ReactNode; accentColor?: string }) {
   return (
-    <div className="screen">
-      <h2>Round {gp.round} - {gp.circuit.name} ({gp.circuit.country})</h2>
+    <div className="popup-overlay" onClick={onClose}>
+      <div className="popup" onClick={e => e.stopPropagation()}>
+        <div className="popup-header" style={{ borderBottom: accentColor ? `3px solid ${accentColor}` : undefined }}>
+          <h2>{title}</h2>
+          <button className="close-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="popup-body">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DriverDetailPopup({ driver }: { driver: Driver; onClose: () => void }) {
+  const { state } = useGame();
+  const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
+  const sk = effectiveDriverSkills(driver);
+  const totalPoints = driver.yearHistory.reduce((a, b) => a + b.points, 0);
+  return (
+    <PopupShell title={driver.name} onClose={() => { /* handled by parent */ }}>
+      <div className="popup-meta">
+        <div><span className={`rarity rarity-${driver.rarity}`}>{driver.rarity}</span> · {driver.archetype}</div>
+        <div>Age {driver.age} · Years active: {driver.yearHistory.length || (driver.age - driver.careerStartAge + 1)}</div>
+        {driver.retired && <div className="muted">⏹️ Retired</div>}
+        {driver.retirementAnnounced && !driver.retired && <div className="retiring">⏳ Final season announced</div>}
+      </div>
+      <h3>Current skills</h3>
+      <div className="skills-row">
+        <span>Driving <strong>{sk.driving}</strong></span>
+        <span>Physical <strong>{sk.physical}</strong></span>
+        <span>Car Setup <strong>{sk.carSetup}</strong></span>
+        <span>Speed <strong>{sk.speed}</strong></span>
+      </div>
+      <h3>Career totals</h3>
+      <div className="stats-row">
+        <span>WC titles: <strong>{driver.careerChampionships}</strong></span>
+        <span>Race wins: <strong>{driver.careerWins}</strong></span>
+        <span>Podiums: <strong>{driver.careerPodiums}</strong></span>
+        <span>Pole positions: <strong>{driver.careerPoles}</strong></span>
+        <span>Race starts: <strong>{driver.careerStarts}</strong></span>
+        <span>Total points: <strong>{totalPoints}</strong></span>
+      </div>
+      <h3>Year-by-year</h3>
+      {driver.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
+        <table className="data-table compact">
+          <thead><tr><th>Year</th><th>Team</th><th>Races</th><th>Wins</th><th>Podiums</th><th>Poles</th><th>Points</th><th></th></tr></thead>
+          <tbody>
+            {driver.yearHistory.map((y, i) => (
+              <tr key={i}>
+                <td>{y.year}</td>
+                <td style={{ color: teamMap.get(y.teamId ?? '')?.color }}>{y.teamName}</td>
+                <td>{y.races}</td>
+                <td>{y.wins}</td>
+                <td>{y.podiums}</td>
+                <td>{y.poles}</td>
+                <td>{y.points}</td>
+                <td>{y.isWorldChampion ? '🏆' : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </PopupShell>
+  );
+}
+
+function TeamDetailPopup({ team, onClose }: { team: Team; onClose: () => void }) {
+  void onClose;
+  return (
+    <PopupShell title={team.name} onClose={() => { /* handled by parent */ }} accentColor={team.color}>
+      <div className="popup-meta">
+        <div>{team.shortName} · Tier: {team.tier} · Legacy base: {team.legacyBaseValue}</div>
+      </div>
+      <h3>Current car</h3>
+      <div className="skills-row">
+        <span>Max Speed <strong>{team.car.maxSpeed}</strong></span>
+        <span>Acceleration <strong>{team.car.acceleration}</strong></span>
+        <span>Turning <strong>{team.car.turning}</strong></span>
+        <span>Reliability <strong>{team.car.reliability}</strong></span>
+      </div>
+      <h3>Career totals</h3>
+      <div className="stats-row">
+        <span>Race wins: <strong>{team.careerWins}</strong></span>
+        <span>Podiums: <strong>{team.careerPodiums}</strong></span>
+        <span>Poles: <strong>{team.careerPoles}</strong></span>
+        <span>Driver WC: <strong>{team.careerDriverWC}</strong></span>
+        <span>Constructor WC: <strong>{team.careerConstructorWC}</strong></span>
+      </div>
+      <h3>Year-by-year</h3>
+      {team.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
+        <table className="data-table compact">
+          <thead><tr><th>Year</th><th>Pos</th><th>Points</th><th>Wins</th><th>Podiums</th><th>Poles</th><th>Car Avg</th><th>Titles</th></tr></thead>
+          <tbody>
+            {team.yearHistory.map((y: TeamYearRecord, i) => (
+              <tr key={i}>
+                <td>{y.year}</td>
+                <td>{y.finalPosition}</td>
+                <td>{y.points}</td>
+                <td>{y.wins}</td>
+                <td>{y.podiums}</td>
+                <td>{y.poles}</td>
+                <td>{y.carAvg.toFixed(1)}</td>
+                <td>{y.driverWC && '🏆D'}{y.constructorWC && ' 🏭C'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </PopupShell>
+  );
+}
+
+function EngDirectorDetailPopup({ director, onClose }: { director: EngineeringDirector; onClose: () => void }) {
+  void onClose;
+  const { state } = useGame();
+  const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
+  return (
+    <PopupShell title={director.name} onClose={() => { /* handled by parent */ }}>
+      <div className="popup-meta">
+        <div><span className={`rarity rarity-${director.rarity}`}>{director.rarity}</span> · Engineering Director</div>
+        <div>Age {director.age} · Years remaining: {Math.max(0, director.yearsRemaining)}</div>
+        {director.retired && <div className="muted">⏹️ Retired</div>}
+      </div>
+      <h3>Skills</h3>
+      <div className="skills-row">
+        <span>Speed target <strong>{director.speedTarget}</strong></span>
+        <span>Accel target <strong>{director.accelTarget}</strong></span>
+        <span>Turning target <strong>{director.turningTarget}</strong></span>
+        <span>Reliability target <strong>{director.reliabilityTarget}</strong></span>
+        <span>Pull factor <strong>{Math.round(director.pullFactor * 100)}%</strong></span>
+      </div>
+      <h3>Career at teams</h3>
+      {director.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
+        <table className="data-table compact">
+          <thead><tr><th>Year</th><th>Team</th><th>Team Wins</th><th>Podiums</th><th>Poles</th><th>Titles</th></tr></thead>
+          <tbody>
+            {director.yearHistory.map((y, i) => (
+              <tr key={i}>
+                <td>{y.year}</td>
+                <td style={{ color: teamMap.get(y.teamId ?? '')?.color }}>{y.teamName}</td>
+                <td>{y.teamRaceWins}</td>
+                <td>{y.teamPodiums}</td>
+                <td>{y.teamPoles}</td>
+                <td>{y.driverWC && '🏆D'}{y.constructorWC && ' 🏭C'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </PopupShell>
+  );
+}
+
+function RaceDirectorDetailPopup({ director, onClose }: { director: RaceDirector; onClose: () => void }) {
+  void onClose;
+  const { state } = useGame();
+  const teamMap = useMemo(() => new Map(state.teams.map(t => [t.id, t])), [state.teams]);
+  return (
+    <PopupShell title={director.name} onClose={() => { /* handled by parent */ }}>
+      <div className="popup-meta">
+        <div><span className={`rarity rarity-${director.rarity}`}>{director.rarity}</span> · Race Director</div>
+        <div>Age {director.age} · Years remaining: {Math.max(0, director.yearsRemaining)}</div>
+        {director.retired && <div className="muted">⏹️ Retired</div>}
+      </div>
+      <h3>Skills</h3>
+      <div className="skills-row">
+        <span>Time improvement <strong>{director.timeImprovementPct}%</strong></span>
+        <span>Reliability bonus <strong>+{director.reliabilityBonus}</strong></span>
+      </div>
+      <h3>Career at teams</h3>
+      {director.yearHistory.length === 0 ? <p className="muted">No completed seasons yet.</p> : (
+        <table className="data-table compact">
+          <thead><tr><th>Year</th><th>Team</th><th>Team Wins</th><th>Podiums</th><th>Poles</th><th>Titles</th></tr></thead>
+          <tbody>
+            {director.yearHistory.map((y, i) => (
+              <tr key={i}>
+                <td>{y.year}</td>
+                <td style={{ color: teamMap.get(y.teamId ?? '')?.color }}>{y.teamName}</td>
+                <td>{y.teamRaceWins}</td>
+                <td>{y.teamPodiums}</td>
+                <td>{y.teamPoles}</td>
+                <td>{y.driverWC && '🏆D'}{y.constructorWC && ' 🏭C'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </PopupShell>
+  );
+}
+
+// ============================================================================
+// RACE WEEKEND OVERLAY — invoked when phase is pre_race / qualifying_* / race_results
+// ============================================================================
+function RaceWeekendOverlay() {
+  const { state, returnToMenu, runQualifying, startRace, finishCurrentRace } = useGame();
+  const gp = state.calendar[state.currentRound - 1];
+  const driverMap = useMemo(() => allDriversMap(state), [state]);
+
+  return (
+    <div className="app">
+      <header className="header">
+        <h1>F1 Sim</h1>
+        <div className="header-info">
+          <span>Year {state.year}</span>
+          <span>Round {state.currentRound} / {state.calendar.length}</span>
+          <button onClick={returnToMenu} className="cancel-btn">← Back to menu</button>
+        </div>
+      </header>
+      <main>
+        <div className="screen">
+          {state.phase === 'pre_race' && <PreRacePane gp={gp} onRunQ={runQualifying} />}
+          {(state.phase === 'qualifying_q1' || state.phase === 'qualifying_q2') && state.lastQualiResult && (
+            <QualifyingPane gp={gp} onStartRace={startRace} />
+          )}
+          {state.phase === 'race_results' && state.lastRaceResult && (
+            <RaceResultsPane onFinish={finishCurrentRace} />
+          )}
+        </div>
+      </main>
+    </div>
+  );
+  void driverMap; // suppress unused — used inside child panes via context
+}
+
+function PreRacePane({ gp, onRunQ }: { gp: any; onRunQ: () => void }) {
+  return (
+    <>
+      <h2>Round {gp.round} — {gp.circuit.name} ({gp.circuit.country})</h2>
       <div className="info-box">
         <p>Circuit profile: <strong>{gp.circuit.profile}</strong></p>
         <p>Weather: <strong>{gp.weather}</strong></p>
@@ -217,106 +894,107 @@ function PreRaceScreen() {
         {gp.weather === 'hot' && <p>🔥 Extreme heat - drivers with high physical/cardio favored.</p>}
         {gp.weather === 'rain' && <p>🌧️ Rain - high driving skill & wet specialists favored.</p>}
       </div>
-      <StandingsPreview />
       <div className="actions">
-        <button className="primary" onClick={() => runQualifying()}>Run Qualifying</button>
+        <button className="primary big" onClick={onRunQ}>Run Qualifying →</button>
       </div>
-    </div>
+    </>
   );
 }
 
-function StandingsPreview() {
+function QualifyingPane({ onStartRace }: { gp: any; onStartRace: () => void }) {
   const { state } = useGame();
-  if (state.currentRound === 1) return null;
-  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
-  const teamMap = new Map(state.teams.map(t => [t.id, t]));
-  return (
-    <div className="standings-preview">
-      <div>
-        <h3>Driver Standings (top 10)</h3>
-        <ol>
-          {state.driverStandings.slice(0, 10).map(s => {
-            const d = driverMap.get(s.driverId);
-            return <li key={s.driverId}>{d?.name} - {s.points}</li>;
-          })}
-        </ol>
-      </div>
-      <div>
-        <h3>Team Standings</h3>
-        <ol>
-          {state.teamStandings.map(s => {
-            const t = teamMap.get(s.teamId);
-            return <li key={s.teamId}>{t?.name} - {s.points}</li>;
-          })}
-        </ol>
-      </div>
-    </div>
-  );
-}
+  const q = state.lastQualiResult!;
+  const driverMap = useMemo(() => allDriversMap(state), [state]);
+  const teamByDriver = useMemo(() => teamByDriverMap(state.teams), [state.teams]);
 
-// ============================================================================
-// QUALI RESULTS - with progressive tick reveal animation
-// ============================================================================
-function QualiResultsScreen() {
-  const { state, runRace } = useGame();
-  const q = state.lastQualiResult;
-  if (!q) return <p>No quali result.</p>;
-  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
-  const teamByDriver = teamByDriverMap(state.teams);
-
-  // Tick state: which tick is currently shown (0 = empty grid, then ticks 1..N, then full result)
-  const totalSteps = q.ticks.length + 1; // +1 for final result step
+  // Phase logic:
+  //  - state.phase === 'qualifying_q1' → only Q1 ticks revealed (steps 0..2 = ticks 0..2, step 3 = "Q1 final").
+  //  - state.phase === 'qualifying_q2' → Q2 ticks (steps 0..2 = ticks 3..5, step 3 = "Q2 final").
+  // We keep separate step counters per phase and reset when transitioning.
+  const isQ1Phase = state.phase === 'qualifying_q1';
+  const maxStep = 4; // 3 ticks + 1 final view per stage
   const [step, setStep] = useState<number>(0);
   const [autoplay, setAutoplay] = useState<boolean>(true);
 
+  // Reset step when phase changes (Q1 → Q2)
   useEffect(() => {
-    if (!autoplay) return;
-    if (step >= totalSteps - 1) return;
+    setStep(0);
+    setAutoplay(true);
+  }, [isQ1Phase]);
+
+  useEffect(() => {
+    if (!autoplay || step >= maxStep - 1) return;
     const t = setTimeout(() => setStep(s => s + 1), 1200);
     return () => clearTimeout(t);
-  }, [step, autoplay, totalSteps]);
+  }, [step, autoplay, maxStep]);
 
-  // Decide what to show at current step
-  const isFinalStep = step >= q.ticks.length;
-  const currentTick = !isFinalStep ? q.ticks[step] : null;
-  const ranking = isFinalStep ? q.ranking : currentTick!.ranking;
-  const times = isFinalStep ? q.times : currentTick!.times;
-  const stageLabel = isFinalStep
-    ? 'Final Results'
-    : `${currentTick!.stage} — Tick ${q.ticks.filter((t, i) => i <= step && t.stage === currentTick!.stage).length}/3`;
+  const isQ1Done = isQ1Phase && step === maxStep - 1;
+  const isQ2Done = !isQ1Phase && step === maxStep - 1;
+  // Get the actual tick: Q1 uses ticks 0..2, Q2 uses ticks 3..5
+  const tickIndex = (isQ1Phase ? 0 : 3) + step;
+  const showFinal = step === maxStep - 1; // "final" view of the current stage
+  const currentTick = !showFinal && tickIndex < q.ticks.length ? q.ticks[tickIndex] : null;
+  // What to display:
+  // - During Q1 ticks: show partial Q1 ranking from currentTick.
+  // - At Q1 final (showFinal && isQ1Phase): show full Q1 ranking sorted by Q1 times — but our QualifyingResult.ranking is post-Q2.
+  //   So we need to reconstruct Q1 final manually. Or better: the last Q1 tick (index 2) already shows all 24 drivers.
+  //   So Q1 final = Q1 tick 3.
+  // - During Q2 ticks: show ticks 3..5.
+  // - At Q2 final: show q.ranking (which is Q2-sorted top 10 + Q1-sorted 11-24).
+  let ranking: string[];
+  let times: Record<string, number>;
+  let stageLabel: string;
+
+  if (isQ1Phase) {
+    if (showFinal) {
+      // Use last Q1 tick (index 2)
+      const lastQ1Tick = q.ticks[2];
+      ranking = lastQ1Tick.ranking;
+      times = lastQ1Tick.times;
+      stageLabel = 'Q1 — Final results';
+    } else {
+      ranking = currentTick!.ranking;
+      times = currentTick!.times;
+      stageLabel = `Q1 — Tick ${step + 1}/3`;
+    }
+  } else {
+    if (showFinal) {
+      ranking = q.ranking;
+      times = q.times;
+      stageLabel = 'Final qualifying results';
+    } else {
+      ranking = currentTick!.ranking;
+      times = currentTick!.times;
+      stageLabel = `Q2 — Tick ${step + 1}/3`;
+    }
+  }
 
   return (
-    <div className="screen">
+    <>
       <h2>Qualifying — {stageLabel}</h2>
-      {isFinalStep && (
+      {isQ2Done && q.poleDriverId && (
         <p>🏆 Pole position: <strong>{driverMap.get(q.poleDriverId)?.name}</strong></p>
       )}
       <div className="tick-controls">
         <button onClick={() => setStep(0)} disabled={step === 0}>⏮ Restart</button>
         <button onClick={() => { setAutoplay(false); setStep(Math.max(0, step - 1)); }} disabled={step === 0}>◀</button>
         <button onClick={() => setAutoplay(a => !a)}>{autoplay ? '⏸ Pause' : '▶ Play'}</button>
-        <button onClick={() => { setAutoplay(false); setStep(Math.min(totalSteps - 1, step + 1)); }} disabled={step >= totalSteps - 1}>▶</button>
-        <button onClick={() => { setAutoplay(false); setStep(totalSteps - 1); }} disabled={step === totalSteps - 1}>⏭ Skip to end</button>
+        <button onClick={() => { setAutoplay(false); setStep(Math.min(maxStep - 1, step + 1)); }} disabled={step >= maxStep - 1}>▶</button>
+        <button onClick={() => { setAutoplay(false); setStep(maxStep - 1); }} disabled={step === maxStep - 1}>⏭ Skip</button>
       </div>
       <table className="data-table">
-        <thead>
-          <tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Q</th></tr>
-        </thead>
+        <thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Time</th><th>Stage</th></tr></thead>
         <tbody>
           {ranking.map((id, i) => {
             const d = driverMap.get(id);
             const t = teamByDriver.get(id);
             const time = times[id];
-            // Q stage indicator: if we're in Q1 tick, everyone shown is Q1.
-            // If we're in Q2 tick or final, top 10 are Q2.
-            const stage = isFinalStep
-              ? (i < 10 ? 'Q2' : 'Q1')
-              : currentTick!.stage;
+            const stage = isQ1Phase ? 'Q1' : (i < 10 ? 'Q2' : 'Q1');
             return (
               <tr key={id}>
                 <td>{i + 1}</td>
                 <td>{d?.name}</td>
-                <td style={{ color: t?.color }}>{t?.shortName}</td>
+                <td style={{ color: t?.color }}>{t?.shortName ?? '—'}</td>
                 <td>{time !== undefined ? time.toFixed(3) : '—'}</td>
                 <td>{stage}</td>
               </tr>
@@ -325,54 +1003,39 @@ function QualiResultsScreen() {
         </tbody>
       </table>
       <div className="actions">
-        <button className="primary" onClick={() => runRace()} disabled={!isFinalStep}>
-          {isFinalStep ? 'Start Race!' : 'Wait for results...'}
-        </button>
+        {isQ1Done && <Q1DoneAction />}
+        {isQ2Done && <button className="primary big" onClick={onStartRace}>Start Race →</button>}
       </div>
-    </div>
+    </>
   );
 }
 
-function teamByDriverMap(teams: Team[]): Map<string, Team> {
-  const map = new Map<string, Team>();
-  for (const t of teams) {
-    if (t.driver1Id) map.set(t.driver1Id, t);
-    if (t.driver2Id) map.set(t.driver2Id, t);
-    if (t.testDriverId) map.set(t.testDriverId, t);
-  }
-  return map;
+function Q1DoneAction() {
+  const { advanceToQ2 } = useGame();
+  return (
+    <button className="primary big" onClick={advanceToQ2}>Run Q2 →</button>
+  );
 }
 
-// ============================================================================
-// RACE RESULTS — with auto-playing snapshot reveals (5 snapshots + grid).
-// Snapshots: Grid → after L3 → after L18 → after L33 → after L48 → after L50 (final)
-// ============================================================================
-function RaceResultsScreen() {
-  const { state, advanceToNextGP, finishSeason } = useGame();
-  const r = state.lastRaceResult;
-  if (!r) return <p>No race result.</p>;
-  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
-  const teamByDriver = teamByDriverMap(state.teams);
-
-  const totalSnapshots = r.snapshots.length; // 6 total: grid + 5 segments
-  const [activeSnapshot, setActiveSnapshot] = useState<number>(0);
+function RaceResultsPane({ onFinish }: { onFinish: () => void }) {
+  const { state } = useGame();
+  const r = state.lastRaceResult!;
+  const driverMap = useMemo(() => allDriversMap(state), [state]);
+  const teamByDriver = useMemo(() => teamByDriverMap(state.teams), [state.teams]);
+  const totalSnapshots = r.snapshots.length;
+  const [snap, setSnap] = useState<number>(0);
   const [autoplay, setAutoplay] = useState<boolean>(true);
-  const snap = r.snapshots[activeSnapshot];
-  const isFinalSnapshot = activeSnapshot === totalSnapshots - 1;
-  const isLastGP = state.currentRound === state.calendar.length;
+  const cur = r.snapshots[snap];
+  const isFinal = snap === totalSnapshots - 1;
 
-  // Auto-advance through snapshots
   useEffect(() => {
-    if (!autoplay) return;
-    if (activeSnapshot >= totalSnapshots - 1) return;
-    // Slower for opening/closing (more drama), faster for mid-race
-    const isDramaticSnapshot = activeSnapshot === 0 || activeSnapshot === totalSnapshots - 2;
-    const delay = isDramaticSnapshot ? 2000 : 1400;
-    const t = setTimeout(() => setActiveSnapshot(s => s + 1), delay);
+    if (!autoplay || snap >= totalSnapshots - 1) return;
+    const dramatic = snap === 0 || snap === totalSnapshots - 2;
+    const t = setTimeout(() => setSnap(s => s + 1), dramatic ? 2000 : 1400);
     return () => clearTimeout(t);
-  }, [activeSnapshot, autoplay, totalSnapshots]);
+  }, [snap, autoplay, totalSnapshots]);
 
-  const lapLabel = (lap: number): string => {
+  const lapLabel = (lap: number) => {
     if (lap === 0) return 'Starting Grid';
     if (lap === 3) return 'After Lap 3 — Opening Laps';
     if (lap === 48) return 'After Lap 48 — Closing In';
@@ -381,70 +1044,54 @@ function RaceResultsScreen() {
   };
 
   return (
-    <div className="screen">
-      <h2>Race — {lapLabel(snap.lap)}</h2>
-      {isFinalSnapshot && (
-        <p>
-          🏁 Winner: <strong>{driverMap.get(r.finalRanking[0])?.name}</strong> &nbsp;|&nbsp;
+    <>
+      <h2>Race — {lapLabel(cur.lap)}</h2>
+      {isFinal && (
+        <p>🏁 Winner: <strong>{driverMap.get(r.finalRanking[0])?.name}</strong> &nbsp;|&nbsp;
           ⚡ Fastest lap: <strong>{driverMap.get(r.fastestLapDriverId)?.name}</strong> &nbsp;|&nbsp;
-          DNFs: {r.dnfs.length}
-        </p>
+          DNFs: {r.dnfs.length}</p>
       )}
-
       <div className="tick-controls">
-        <button onClick={() => setActiveSnapshot(0)} disabled={activeSnapshot === 0}>⏮ Restart</button>
-        <button onClick={() => { setAutoplay(false); setActiveSnapshot(Math.max(0, activeSnapshot - 1)); }} disabled={activeSnapshot === 0}>◀</button>
+        <button onClick={() => setSnap(0)} disabled={snap === 0}>⏮ Restart</button>
+        <button onClick={() => { setAutoplay(false); setSnap(Math.max(0, snap - 1)); }} disabled={snap === 0}>◀</button>
         <button onClick={() => setAutoplay(a => !a)}>{autoplay ? '⏸ Pause' : '▶ Play'}</button>
-        <button onClick={() => { setAutoplay(false); setActiveSnapshot(Math.min(totalSnapshots - 1, activeSnapshot + 1)); }} disabled={activeSnapshot >= totalSnapshots - 1}>▶</button>
-        <button onClick={() => { setAutoplay(false); setActiveSnapshot(totalSnapshots - 1); }} disabled={isFinalSnapshot}>⏭ Skip to end</button>
+        <button onClick={() => { setAutoplay(false); setSnap(Math.min(totalSnapshots - 1, snap + 1)); }} disabled={snap >= totalSnapshots - 1}>▶</button>
+        <button onClick={() => { setAutoplay(false); setSnap(totalSnapshots - 1); }} disabled={isFinal}>⏭ Skip</button>
       </div>
-
       <div className="lap-controls">
         <span>Jump to:</span>
         {r.snapshots.map((s, i) => (
-          <button key={i} className={i === activeSnapshot ? 'active' : ''} onClick={() => { setAutoplay(false); setActiveSnapshot(i); }}>
+          <button key={i} className={i === snap ? 'active' : ''} onClick={() => { setAutoplay(false); setSnap(i); }}>
             {s.lap === 0 ? 'Grid' : `L${s.lap}`}
           </button>
         ))}
       </div>
-
       <table className="data-table">
-        <thead>
-          <tr><th>Pos</th><th>Driver</th><th>Team</th><th>Δ vs Quali</th><th>Status</th></tr>
-        </thead>
+        <thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Δ vs Quali</th><th>Status</th></tr></thead>
         <tbody>
-          {snap.ranking.map((id, i) => {
+          {cur.ranking.map((id, i) => {
             const d = driverMap.get(id);
             const t = teamByDriver.get(id);
-            const delta = snap.positionsGainedVsQuali[id] ?? 0;
+            const delta = cur.positionsGainedVsQuali[id] ?? 0;
             const isDNF = r.dnfs.includes(id);
             return (
               <tr key={id}>
                 <td>{i + 1}</td>
                 <td>{d?.name}</td>
-                <td style={{ color: t?.color }}>{t?.shortName}</td>
-                <td>
-                  {delta > 0 ? <span className="up">▲ {delta}</span> :
-                   delta < 0 ? <span className="down">▼ {-delta}</span> :
-                   <span>—</span>}
-                </td>
-                <td>
-                  {isDNF ? <span className="down">DNF</span> : ''}
-                  {isFinalSnapshot && !isDNF && r.pointsAwarded[id] ? `+${r.pointsAwarded[id]} pts` : ''}
-                </td>
+                <td style={{ color: t?.color }}>{t?.shortName ?? '—'}</td>
+                <td>{delta > 0 ? <span className="up">▲ {delta}</span> : delta < 0 ? <span className="down">▼ {-delta}</span> : '—'}</td>
+                <td>{isDNF ? <span className="down">DNF</span> : ''}{isFinal && !isDNF && r.pointsAwarded[id] ? `+${r.pointsAwarded[id]} pts` : ''}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
-
-      {snap.newIncidents.length > 0 && (
+      {cur.newIncidents.length > 0 && (
         <div className="incidents">
-          <h4>Incidents on lap {snap.lap}:</h4>
+          <h4>Incidents on lap {cur.lap}:</h4>
           <ul>
-            {snap.newIncidents.map((inc, i) => (
-              <li key={i}>
-                {driverMap.get(inc.driverId)?.name}: {inc.type.replace('_', ' ')}
+            {cur.newIncidents.map((inc, i) => (
+              <li key={i}>{driverMap.get(inc.driverId)?.name}: {inc.type.replace('_', ' ')}
                 {inc.causesInjury && ` (injury — out for ${inc.injuryRaces} race${inc.injuryRaces > 1 ? 's' : ''})`}
                 {inc.delaySeconds > 0 && ` (lost ${inc.delaySeconds}s)`}
               </li>
@@ -452,165 +1099,81 @@ function RaceResultsScreen() {
           </ul>
         </div>
       )}
-
       <div className="actions">
-        {!isLastGP && <button className="primary" onClick={advanceToNextGP} disabled={!isFinalSnapshot}>
-          {isFinalSnapshot ? 'Next Grand Prix →' : 'Wait for race to finish...'}
-        </button>}
-        {isLastGP && <button className="primary" onClick={() => finishSeason()} disabled={!isFinalSnapshot}>
-          {isFinalSnapshot ? 'End of Season →' : 'Wait for race to finish...'}
-        </button>}
+        <button className="primary big" onClick={onFinish} disabled={!isFinal}>
+          {isFinal ? (state.currentRound === state.calendar.length ? 'End Season →' : 'Continue →') : 'Wait...'}
+        </button>
       </div>
-    </div>
+    </>
   );
 }
 
 // ============================================================================
-// SEASON SUMMARY -> NEW CARS -> MARKET -> NEW SEASON
+// HELPERS
 // ============================================================================
-function SeasonSummaryScreen() {
-  const { state, startNewSeason, finishSeason } = useGame();
-  const [stage, setStage] = useState<'summary' | 'cars' | 'market'>('summary');
-  const [summary] = useState<SeasonSummary>(() => finishSeason());
-  const [marketResult, setMarketResult] = useState<{
-    retirementMoves: MarketMove[];
-    marketMoves: MarketMove[];
-    newCarChanges: Array<{ teamId: string; before: Team['car']; after: Team['car'] }>;
-  } | null>(null);
-  const driverMap = new Map(state.drivers.map(d => [d.id, d]));
-  const teamMap = new Map(state.teams.map(t => [t.id, t]));
-
-  if (stage === 'summary') {
-    return (
-      <div className="screen">
-        <h2>Season {summary.year} Summary</h2>
-        <div className="awards">
-          <div>🏆 Champion: <strong>{driverMap.get(summary.championDriverId)?.name}</strong></div>
-          <div>🏭 Constructor: <strong>{teamMap.get(summary.championTeamId)?.name}</strong></div>
-          <div>🥇 Most wins: <strong>{driverMap.get(summary.mostWinsDriverId)?.name}</strong> ({driverMap.get(summary.mostWinsDriverId)?.seasonWins})</div>
-          {summary.rookieOfYearDriverId && (
-            <div>🌟 Rookie of the Year: <strong>{driverMap.get(summary.rookieOfYearDriverId)?.name}</strong></div>
-          )}
-        </div>
-        <h3>Final Driver Standings</h3>
-        <table className="data-table">
-          <thead><tr><th>Pos</th><th>Driver</th><th>Points</th><th>Wins</th></tr></thead>
-          <tbody>
-            {summary.finalDriverStandings.map((s, i) => {
-              const d = driverMap.get(s.driverId);
-              return <tr key={s.driverId}><td>{i + 1}</td><td>{d?.name}</td><td>{s.points}</td><td>{d?.seasonWins ?? 0}</td></tr>;
-            })}
-          </tbody>
-        </table>
-        <h3>Final Constructor Standings</h3>
-        <table className="data-table">
-          <thead><tr><th>Pos</th><th>Team</th><th>Points</th></tr></thead>
-          <tbody>
-            {summary.finalTeamStandings.map((s, i) => {
-              const t = teamMap.get(s.teamId);
-              return <tr key={s.teamId}><td>{i + 1}</td><td style={{ color: t?.color }}>{t?.name}</td><td>{s.points}</td></tr>;
-            })}
-          </tbody>
-        </table>
-        <div className="actions">
-          <button className="primary" onClick={() => {
-            const result = startNewSeason();
-            setMarketResult(result);
-            setStage('cars');
-          }}>New Cars Unveiling →</button>
-        </div>
-      </div>
-    );
+function teamByDriverMap(teams: Team[]): Map<string, Team> {
+  const m = new Map<string, Team>();
+  for (const t of teams) {
+    if (t.driver1Id) m.set(t.driver1Id, t);
+    if (t.driver2Id) m.set(t.driver2Id, t);
+    if (t.testDriverId) m.set(t.testDriverId, t);
   }
-
-  if (stage === 'cars' && marketResult) {
-    return (
-      <div className="screen">
-        <h2>{state.year} Cars Unveiled</h2>
-        <table className="data-table">
-          <thead>
-            <tr><th>Team</th><th>Speed</th><th>Accel</th><th>Turn</th><th>Reliab</th></tr>
-          </thead>
-          <tbody>
-            {marketResult.newCarChanges.map(c => {
-              const t = teamMap.get(c.teamId);
-              if (!t) return null;
-              return (
-                <tr key={c.teamId}>
-                  <td style={{ color: t.color }}>{t.name}</td>
-                  <td><Delta before={c.before.maxSpeed} after={c.after.maxSpeed} /></td>
-                  <td><Delta before={c.before.acceleration} after={c.after.acceleration} /></td>
-                  <td><Delta before={c.before.turning} after={c.after.turning} /></td>
-                  <td><Delta before={c.before.reliability} after={c.after.reliability} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p><em>(Stats shown are pre-engineering-director boost.)</em></p>
-        <div className="actions">
-          <button className="primary" onClick={() => setStage('market')}>Market Summary →</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (stage === 'market' && marketResult) {
-    return (
-      <div className="screen">
-        <h2>{state.year} Market Summary</h2>
-        <h3>Retirements & New Arrivals</h3>
-        <div className="market-list">
-          {marketResult.retirementMoves.map((m, i) => <MoveCard key={i} m={m} />)}
-        </div>
-        <h3>Signings</h3>
-        <div className="market-list">
-          {marketResult.marketMoves.map((m, i) => <MoveCard key={i} m={m} />)}
-        </div>
-        <div className="actions">
-          <button className="primary" onClick={() => window.location.reload()}>
-            Start Season {state.year} →
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+  return m;
 }
 
-function Delta({ before, after }: { before: number; after: number }) {
-  const diff = after - before;
+// Map of all drivers including retired — for lookups in result views (winners might be retired now)
+function allDriversMap(state: ReturnType<typeof useGame>['state']): Map<string, Driver> {
+  return new Map([...state.drivers, ...state.retiredDrivers].map(d => [d.id, d]));
+}
+
+function rarityOrder(r: Rarity): number {
+  return { legend: 0, epic: 1, rare: 2, uncommon: 3, common: 4 }[r];
+}
+
+function sortDrivers(drivers: Driver[], k: DriverSortKey, asc: boolean, teamByDriver: Map<string, Team>): Driver[] {
+  const dir = asc ? 1 : -1;
+  return [...drivers].sort((a, b) => {
+    const sa = effectiveDriverSkills(a);
+    const sb = effectiveDriverSkills(b);
+    const teamA = teamByDriver.get(a.id)?.name ?? '~Free Agent';
+    const teamB = teamByDriver.get(b.id)?.name ?? '~Free Agent';
+    switch (k) {
+      case 'name': return dir * a.name.localeCompare(b.name);
+      case 'team': return dir * teamA.localeCompare(teamB);
+      case 'age': return dir * (a.age - b.age);
+      case 'rarity': return dir * (rarityOrder(a.rarity) - rarityOrder(b.rarity));
+      case 'driving': return dir * (sa.driving - sb.driving);
+      case 'physical': return dir * (sa.physical - sb.physical);
+      case 'carSetup': return dir * (sa.carSetup - sb.carSetup);
+      case 'speed': return dir * (sa.speed - sb.speed);
+      case 'years': return dir * ((a.age - a.careerStartAge) - (b.age - b.careerStartAge));
+    }
+  });
+}
+
+function toggleSort<T extends string>(
+  k: T, current: T, asc: boolean,
+  setKey: (k: T) => void, setAsc: (b: boolean) => void
+) {
+  if (k === current) setAsc(!asc);
+  else { setKey(k); setAsc(false); }
+}
+
+function SortHeader<T extends string>({ label, k, curr, asc, onClick }: {
+  label: string; k: T; curr: T; asc: boolean; onClick: (k: T) => void;
+}) {
   return (
-    <span>
-      {before} → <strong>{after}</strong>{' '}
-      {diff > 0 ? <span className="up">+{diff}</span> :
-       diff < 0 ? <span className="down">{diff}</span> :
-       <span>—</span>}
-    </span>
+    <th onClick={() => onClick(k)} className="sortable">
+      {label} {k === curr ? (asc ? '▲' : '▼') : ''}
+    </th>
   );
 }
 
-function MoveCard({ m }: { m: MarketMove }) {
-  return (
-    <div className="move-card">
-      <strong>{labelFor(m.kind)}</strong>
-      <div>{m.entityName} {m.entityRarity && <span className={`rarity rarity-${m.entityRarity}`}>{m.entityRarity}</span>}</div>
-      {m.fromTeam && <div>From: {m.fromTeam}</div>}
-      {m.toTeam && <div>To: {m.toTeam}</div>}
-      {m.position && <div className="muted">{m.position}</div>}
-    </div>
-  );
+function DriverLink({ id, drivers, onClick }: { id: string; drivers: Driver[]; onClick: (d: Driver) => void }) {
+  const d = drivers.find(x => x.id === id);
+  if (!d) return <span>—</span>;
+  return <button className="link-btn" onClick={() => onClick(d)}>{d.name}</button>;
 }
 
-function labelFor(kind: MarketMove['kind']): string {
-  switch (kind) {
-    case 'driver_signed':    return '✍️ Signed';
-    case 'driver_released':  return '👋 Released';
-    case 'driver_retired':   return '⏹️ Retired';
-    case 'rookie_arrived':   return '🌟 New rookie';
-    case 'director_signed':  return '✍️ Director signed';
-    case 'director_released':return '👋 Director released';
-    case 'director_retired': return '⏹️ Director retired';
-  }
-}
+// Suppress unused-import warning (DriverYearRecord is used by type narrowing only)
+void ({} as DriverYearRecord);

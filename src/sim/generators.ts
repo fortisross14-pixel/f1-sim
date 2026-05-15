@@ -117,6 +117,7 @@ export function createDriver(rng: RNG, rarity: Rarity, age?: number): Driver {
     careerStartAge: startAge,
     retirementAge,
     retirementAnnounced: false,
+    retired: false,
     injuredRaces: 0,
     seasonWins: 0,
     seasonPodiums: 0,
@@ -124,8 +125,11 @@ export function createDriver(rng: RNG, rarity: Rarity, age?: number): Driver {
     seasonPoles: 0,
     seasonFastestLaps: 0,
     careerWins: 0,
+    careerPodiums: 0,
+    careerPoles: 0,
     careerChampionships: 0,
     careerStarts: 0,
+    yearHistory: [],
   };
 }
 
@@ -168,6 +172,8 @@ export function createEngineeringDirector(rng: RNG, rarity: Rarity): Engineering
     pullFactor: ranges.pull,
     age: rng.int(35, 60),
     yearsRemaining: rng.int(8, 12),
+    retired: false,
+    yearHistory: [],
   };
 }
 
@@ -182,6 +188,8 @@ export function createRaceDirector(rng: RNG, rarity: Rarity): RaceDirector {
     timeImprovementPct: parseFloat(rng.range(tLo, tHi).toFixed(2)),
     age: rng.int(35, 60),
     yearsRemaining: rng.int(8, 12),
+    retired: false,
+    yearHistory: [],
   };
 }
 
@@ -246,6 +254,14 @@ export function createTeams(rng: RNG): Team[] {
     marketPoints: t.tier === 'top' ? 17 : 13,
     seasonPoints: 0,
     seasonWins: 0,
+    seasonPodiums: 0,
+    seasonPoles: 0,
+    careerWins: 0,
+    careerPodiums: 0,
+    careerPoles: 0,
+    careerDriverWC: 0,
+    careerConstructorWC: 0,
+    yearHistory: [],
   }));
 }
 
