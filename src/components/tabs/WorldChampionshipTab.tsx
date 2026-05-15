@@ -313,43 +313,85 @@ function PreseasonView({ data }: { data: PreseasonData }) {
 
 function PreseasonSummary({ data }: { data: PreseasonData }) {
   const audio = useAudio();
+  // Champion fanfare on first mount
   useEffect(() => { audio.play('champion'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mostWins = data.finalDriverStandings.find(d => d.driverId === data.mostWinsDriverId);
+  const rookie = data.rookieOfYearDriverId
+    ? data.finalDriverStandings.find(d => d.driverId === data.rookieOfYearDriverId)
+    : null;
+  const constructorChamp = data.finalTeamStandings[0];
+
   return (
     <>
-      <div className="awards">
-        <div>🏆 World Champion: <strong>{data.championDriverName}</strong></div>
-        <div>🏭 Constructors': <strong>{data.finalTeamStandings[0]?.teamName ?? '—'}</strong></div>
-        <div>🥇 Most wins: <strong>
-          {data.finalDriverStandings.find(d => d.driverId === data.mostWinsDriverId)?.driverName ?? '—'}
-        </strong></div>
-        {data.rookieOfYearDriverId && (
-          <div>🌟 Rookie of the Year: <strong>
-            {data.finalDriverStandings.find(d => d.driverId === data.rookieOfYearDriverId)?.driverName ?? '—'}
-          </strong></div>
+      {/* Champion hero — subtle reveal animation defined in CSS */}
+      <div className="champion-hero">
+        <div className="champion-hero-label">World Champion</div>
+        <div className="champion-hero-name">{data.championDriverName}</div>
+        <div className="champion-hero-meta">
+          Season {data.yearEnded} · {data.finalDriverStandings[0]?.points ?? 0} points
+        </div>
+      </div>
+
+      {/* Award cards row */}
+      <div className="award-grid">
+        <div className="award-card award-card-constructor">
+          <div className="award-card-icon">🏭</div>
+          <div className="award-card-label">Constructors' Champion</div>
+          <div className="award-card-value">{constructorChamp?.teamName ?? '—'}</div>
+          <div className="award-card-meta">{constructorChamp?.points ?? 0} pts</div>
+        </div>
+        <div className="award-card award-card-wins">
+          <div className="award-card-icon">🥇</div>
+          <div className="award-card-label">Most Wins</div>
+          <div className="award-card-value">{mostWins?.driverName ?? '—'}</div>
+          <div className="award-card-meta">{mostWins?.wins ?? 0} wins</div>
+        </div>
+        {rookie && (
+          <div className="award-card award-card-rookie">
+            <div className="award-card-icon">🌟</div>
+            <div className="award-card-label">Rookie of the Year</div>
+            <div className="award-card-value">{rookie.driverName}</div>
+            <div className="award-card-meta">{rookie.points} pts</div>
+          </div>
         )}
       </div>
-      <h3>Final Driver Standings</h3>
-      <table className="data-table">
-        <thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th>Points</th><th>Wins</th></tr></thead>
-        <tbody>
-          {data.finalDriverStandings.map((s, i) => (
-            <tr key={s.driverId}>
-              <td>{i + 1}</td><td>{s.driverName}</td><td>{s.teamName}</td><td>{s.points}</td><td>{s.wins}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <h3>Final Constructor Standings</h3>
-      <table className="data-table">
-        <thead><tr><th>Pos</th><th>Team</th><th>Points</th><th>Wins</th></tr></thead>
-        <tbody>
-          {data.finalTeamStandings.map((s, i) => (
-            <tr key={s.teamId}>
-              <td>{i + 1}</td><td>{s.teamName}</td><td>{s.points}</td><td>{s.wins}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      <div className="standings-side-by-side">
+        <div>
+          <h3>Final Driver Standings</h3>
+          <table className="data-table standings-table compact">
+            <thead><tr><th>Pos</th><th>Driver</th><th>Team</th><th className="num">Pts</th><th className="num">W</th></tr></thead>
+            <tbody>
+              {data.finalDriverStandings.map((s, i) => (
+                <tr key={s.driverId}>
+                  <td><span className={`pos-badge ${i === 0 ? 'pos-1' : i === 1 ? 'pos-2' : i === 2 ? 'pos-3' : ''}`}>{i + 1}</span></td>
+                  <td>{s.driverName}</td>
+                  <td className="muted">{s.teamName}</td>
+                  <td className="num"><strong>{s.points}</strong></td>
+                  <td className="num">{s.wins}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3>Final Constructor Standings</h3>
+          <table className="data-table standings-table compact">
+            <thead><tr><th>Pos</th><th>Team</th><th className="num">Pts</th><th className="num">W</th></tr></thead>
+            <tbody>
+              {data.finalTeamStandings.map((s, i) => (
+                <tr key={s.teamId}>
+                  <td><span className={`pos-badge ${i === 0 ? 'pos-1' : i === 1 ? 'pos-2' : i === 2 ? 'pos-3' : ''}`}>{i + 1}</span></td>
+                  <td>{s.teamName}</td>
+                  <td className="num"><strong>{s.points}</strong></td>
+                  <td className="num">{s.wins}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </>
   );
 }
@@ -357,62 +399,97 @@ function PreseasonSummary({ data }: { data: PreseasonData }) {
 function PreseasonMarket({ data }: { data: PreseasonData }) {
   return (
     <>
-      <h3>Retirements ({data.retirements.length})</h3>
-      <div className="market-list">
+      <MarketSection title="Retirements" count={data.retirements.length} icon="⏹️" tone="retired">
         {data.retirements.map((r, i) => (
-          <div key={i} className="move-card">
-            <strong>⏹️ Retired</strong>
-            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
-            <div className="muted">
-              {r.kind === 'driver' ? 'Driver' : r.kind === 'engDirector' ? 'Eng Director' : 'Race Director'}
+          <div key={i} className={`market-card rarity-edge-${r.rarity}`}>
+            <div className="market-card-name">{r.name}</div>
+            <div className="market-card-meta">
+              <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span>
+              <span className="muted">
+                {r.kind === 'driver' ? 'Driver' : r.kind === 'engDirector' ? 'Eng Director' : 'Race Director'}
+              </span>
             </div>
           </div>
         ))}
-      </div>
-      <h3>Rookies arrived ({data.rookieArrivals.length})</h3>
-      <div className="market-list">
+      </MarketSection>
+
+      <MarketSection title="Rookies arrived" count={data.rookieArrivals.length} icon="🌟" tone="rookie">
         {data.rookieArrivals.map((r, i) => (
-          <div key={i} className="move-card">
-            <strong>🌟 Rookie</strong>
-            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
+          <div key={i} className={`market-card rarity-edge-${r.rarity}`}>
+            <div className="market-card-name">{r.name}</div>
+            <div className="market-card-meta">
+              <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span>
+            </div>
           </div>
         ))}
-      </div>
-      <h3>Released ({data.releases.length})</h3>
-      <div className="market-list">
+      </MarketSection>
+
+      <MarketSection title="Released" count={data.releases.length} icon="👋" tone="released">
         {data.releases.map((r, i) => (
-          <div key={i} className="move-card">
-            <strong>👋 Released</strong>
-            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
-            <div className="muted">from {r.fromTeam}</div>
+          <div key={i} className={`market-card rarity-edge-${r.rarity}`}>
+            <div className="market-card-name">{r.name}</div>
+            <div className="market-card-meta">
+              <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span>
+              <span className="muted">from {r.fromTeam}</span>
+            </div>
           </div>
         ))}
-      </div>
-      <h3>Signings ({data.signings.length})</h3>
-      <div className="market-list">
+      </MarketSection>
+
+      <MarketSection title="Signings" count={data.signings.length} icon="✍️" tone="signed">
         {data.signings.map((r, i) => (
-          <div key={i} className="move-card">
-            <strong>✍️ Signed</strong>
-            <div>{r.name} <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span></div>
-            <div className="muted">to {r.toTeam}</div>
-            <div className="muted">{r.position}</div>
+          <div key={i} className={`market-card rarity-edge-${r.rarity}`}>
+            <div className="market-card-name">{r.name}</div>
+            <div className="market-card-meta">
+              <span className={`rarity rarity-${r.rarity}`}>{r.rarity}</span>
+              <span className="muted">→ {r.toTeam}</span>
+            </div>
+            <div className="market-card-position">{r.position}</div>
           </div>
         ))}
-      </div>
+      </MarketSection>
     </>
+  );
+}
+
+// Section wrapper used 4 times in the market view. Renders a uppercase
+// section heading with a count badge, then the children grid.
+function MarketSection({ title, count, icon, tone, children }: {
+  title: string; count: number; icon: string;
+  tone: 'retired' | 'rookie' | 'released' | 'signed';
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`market-section market-section-${tone}`}>
+      <div className="market-section-header">
+        <span className="market-section-icon">{icon}</span>
+        <span className="market-section-title">{title}</span>
+        <span className="market-section-count">{count}</span>
+      </div>
+      {count === 0 ? (
+        <p className="muted" style={{ marginLeft: 8 }}>None this off-season.</p>
+      ) : (
+        <div className="market-list">{children}</div>
+      )}
+    </div>
   );
 }
 
 function PreseasonCars({ data }: { data: PreseasonData }) {
   return (
     <>
-      <h3>Car evolution year {data.yearEnded} → {data.yearEnded + 1}</h3>
-      <table className="data-table">
+      <h3>Car evolution {data.yearEnded} → {data.yearEnded + 1}</h3>
+      <table className="data-table cars-table">
         <thead><tr><th>Team</th><th>Speed</th><th>Accel</th><th>Turn</th><th>Reliab</th></tr></thead>
         <tbody>
           {data.carEvolution.map(c => (
             <tr key={c.teamId}>
-              <td style={{ color: c.teamColor }}>{c.teamName}</td>
+              <td>
+                <span className="team-cell">
+                  <span className="team-dot" style={{ background: c.teamColor }} />
+                  <span style={{ color: c.teamColor, fontWeight: 600 }}>{c.teamName}</span>
+                </span>
+              </td>
               <td><Delta before={c.before.maxSpeed} after={c.after.maxSpeed} /></td>
               <td><Delta before={c.before.acceleration} after={c.after.acceleration} /></td>
               <td><Delta before={c.before.turning} after={c.after.turning} /></td>
@@ -421,18 +498,26 @@ function PreseasonCars({ data }: { data: PreseasonData }) {
           ))}
         </tbody>
       </table>
-      <p className="muted">(Stats above are pre-engineering-director boost.)</p>
+      <p className="muted">Stats above are pre-engineering-director boost.</p>
     </>
   );
 }
 
 function Delta({ before, after }: { before: number; after: number }) {
   const diff = after - before;
+  const magnitude = Math.abs(diff);
+  // Color intensity by magnitude: tiny changes muted, big swings bold
+  let cls = 'delta-flat';
+  if (diff > 0) cls = magnitude >= 5 ? 'delta-up-strong' : 'delta-up';
+  else if (diff < 0) cls = magnitude >= 5 ? 'delta-down-strong' : 'delta-down';
   return (
-    <span>{before} → <strong>{after}</strong>{' '}
-      {diff > 0 ? <span className="up">+{diff}</span>
-        : diff < 0 ? <span className="down">{diff}</span>
-        : <span>—</span>}
+    <span className="cars-delta">
+      <span className="cars-delta-before">{before}</span>
+      <span className="cars-delta-arrow">→</span>
+      <span className="cars-delta-after">{after}</span>
+      <span className={cls}>
+        {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '—'}
+      </span>
     </span>
   );
 }
