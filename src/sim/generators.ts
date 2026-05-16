@@ -301,6 +301,7 @@ export function createTeams(rng: RNG): Team[] {
     engDirectorId: null,
     raceDirectorId: null,
     marketPoints: t.tier === 'top' ? 17 : 13,
+    tempCarUpgrade: null,
     seasonPoints: 0,
     seasonWins: 0,
     seasonPodiums: 0,
@@ -345,7 +346,7 @@ function rollWeather(rng: RNG, c: { country: string }): Weather {
 // POOL GENERATION (40 drivers, 20 eng directors, 20 race directors)
 // ============================================================================
 
-export function generateDriverPool(rng: RNG, size = 40): Driver[] {
+export function generateDriverPool(rng: RNG, size = 54): Driver[] {
   const rarities: Rarity[] = [];
   // Pick a count within each target range
   const [legLo, legHi]   = POOL_RARITY_TARGETS.legend;
@@ -377,21 +378,24 @@ export function generateDriverPool(rng: RNG, size = 40): Driver[] {
   return drivers;
 }
 
-export function generateEngDirectorPool(rng: RNG, size = 20): EngineeringDirector[] {
+export function generateEngDirectorPool(rng: RNG, size = 28): EngineeringDirector[] {
   return generateDirectorRarities(rng, size).map(r => createEngineeringDirector(rng, r));
 }
 
-export function generateRaceDirectorPool(rng: RNG, size = 20): RaceDirector[] {
+export function generateRaceDirectorPool(rng: RNG, size = 28): RaceDirector[] {
   return generateDirectorRarities(rng, size).map(r => createRaceDirector(rng, r));
 }
 
 function generateDirectorRarities(rng: RNG, size: number): Rarity[] {
-  // 1-2 legend, 1-2 epic, 2-3 rare, rest uncommon/common
-  const legends = rng.int(1, 2);
-  const epics   = rng.int(1, 2);
-  const rares   = rng.int(2, 3);
+  // Scaled up so a 28-strong pool has real rarity variety. Rares bumped
+  // up to 6-7 so the replacement pass has credible mid-rarity targets each
+  // season. With 12 teams needing one director each, this leaves ~16 free
+  // agents per pool.
+  const legends = rng.int(2, 3);
+  const epics   = rng.int(3, 4);
+  const rares   = rng.int(6, 7);
   const remaining = size - legends - epics - rares;
-  const uncommons = Math.floor(remaining * 0.6);
+  const uncommons = Math.floor(remaining * 0.55);
   const commons = remaining - uncommons;
   const out: Rarity[] = [];
   for (let i = 0; i < legends; i++)   out.push('legend');

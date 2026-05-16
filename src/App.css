@@ -2336,6 +2336,16 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
+/* "Overall" column variant — slightly heavier weight to differentiate from
+   the individual stat columns in the same row. */
+.cars-delta-overall {
+  font-size: 14px;
+}
+.cars-delta-overall .cars-delta-after {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 15px;
+}
 .delta-up-strong {
   background: rgba(0, 168, 90, 0.15);
   color: #166534;
@@ -2738,6 +2748,83 @@ button.universe-delete-link:hover {
   font-size: 12px;
   border-radius: var(--r-sm);
   box-shadow: 0 1px 2px rgba(245, 158, 11, 0.25);
+}
+
+/* ============================================================================
+   HISTORY — WORLD CHAMPIONSHIPS SUB-TAB
+   ============================================================================ */
+
+/* Summary cards row at the top of the WC sub-tab */
+.wc-summary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
+}
+.wc-summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+  position: relative;
+  border-top: 3px solid #F59E0B;
+  transition: transform var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
+}
+.wc-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.wc-summary-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+.wc-summary-value {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 32px;
+  line-height: 1;
+  margin-top: var(--sp-2);
+  font-variant-numeric: tabular-nums;
+}
+.wc-summary-value-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.2;
+  margin-top: var(--sp-2);
+}
+.wc-summary-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+/* WC table — year-by-year roll-call */
+.wc-table .wc-year {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.wc-champion-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.wc-champion-name {
+  font-weight: 600;
+}
+.wc-row {
+  /* Subtle gold accent on the year cell to reinforce "championship row" */
+}
+.wc-row td:first-child {
+  box-shadow: inset 3px 0 0 #F59E0B;
 }
 
 /* ============================================================================ */

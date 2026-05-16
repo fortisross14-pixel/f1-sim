@@ -2,14 +2,16 @@ import {
   Driver, Team, EngineeringDirector, RaceDirector,
   SeasonState, GamePhase, Rarity, POOL_RARITY_TARGETS,
   RaceResult, PreseasonData, DriverYearRecord,
-  CircuitHistoryEntry, Weather,
+  CircuitHistoryEntry, Weather, CarStats,
 } from './types';
 import {
   createDriver, createEngineeringDirector, createRaceDirector,
   createTeams, createCalendar, generateDriverPool, generateEngDirectorPool,
   generateRaceDirectorPool, rollCarStats,
 } from './generators';
-import { runDraft, applyEngDirectorsToCars, runInitialAssignment } from './market';
+import {
+  runDraft, applyEngDirectorsToCars, runInitialAssignment, runCarUpgradePass,
+} from './market';
 import { RNG } from './rng';
 
 // ============================================================================
@@ -519,37 +521,61 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   }
 
   // ---- 9) Generate new rookies and replacement directors ----
+  // Targets match POOL_RARITY_TARGETS sums + a healthy free agent surplus.
+  // 50 drivers = 36 team-signed max + ~14 free agents. 28 directors per kind
+  // = 12 team-assigned + ~16 free agents per kind.
   const rookieArrivals: PreseasonData['rookieArrivals'] = [];
-  while (state.drivers.length < 40) {
+  while (state.drivers.length < 54) {
     const rarity = nextRarityToFill(state.drivers, rng);
     const newDriver = createDriver(rng, rarity);
     newDriver.age = 23;
     state.drivers.push(newDriver);
     rookieArrivals.push({ name: newDriver.name, rarity: newDriver.rarity });
   }
-  while (state.engineeringDirectors.length < 20) {
+  while (state.engineeringDirectors.length < 28) {
     const rarity = nextDirectorRarityToFill(state.engineeringDirectors.map(e => e.rarity), rng);
     state.engineeringDirectors.push(createEngineeringDirector(rng, rarity));
   }
-  while (state.raceDirectors.length < 20) {
+  while (state.raceDirectors.length < 28) {
     const rarity = nextDirectorRarityToFill(state.raceDirectors.map(r => r.rarity), rng);
     state.raceDirectors.push(createRaceDirector(rng, rarity));
   }
 
   // ---- 10) Re-roll cars ----
-  const carEvolution: PreseasonData['carEvolution'] = [];
+  // Clearing tempCarUpgrade: re-rolling t.car implicitly removed the previous
+  // year's upgrade (it was baked into the previous car stats, which are now
+  // replaced wholesale). The Team-level marker is set to null so the next
+  // pass can apply a fresh upgrade if conditions are met.
+  //
+  // Drift is biased by finishing position to prevent dynasty compounding.
+  // The reigning constructors champion gets the harshest pullback (typically
+  // -3 to -5), bottom teams a meaningful boost (+0 to +5). This is the F1
+  // reality: when you're winning, rivals copy your design and catch up; when
+  // you're losing, you invest in radical redesigns and benefit from regulation
+  // changes. Critically, this breaks the "same driver wins 8+ in a row"
+  // pattern by ensuring even the strongest team's car regresses meaningfully
+  // each year — they have to rebuild dominance, not just inherit it.
+  const positionByTeam = new Map<string, number>();
+  state.teamStandings.forEach((s, i) => positionByTeam.set(s.teamId, i + 1));
+  const carBefore: Record<string, CarStats> = {};
   for (const t of state.teams) {
-    const before = { ...t.car };
-    const drift = rng.int(-2, 2);
+    carBefore[t.id] = { ...t.car };
+    const pos = positionByTeam.get(t.id) ?? 6;
+    // Drift range:
+    //   P1  → [-5, -2]  (champion regression)
+    //   P6  → [-2, +2]  (mid-pack: normal variance)
+    //   P12 → [+1, +5]  (cellar dweller: meaningful boost)
+    // Interpolated linearly between P1 and P12. The total range per team stays
+    // around 4 points, so individual cars still feel re-rolled rather than
+    // shuffled-by-fiat, but the expected direction is strong enough to prevent
+    // dynasty compounding.
+    const t01 = (pos - 1) / 11; // 0 at P1, 1 at P12
+    const driftMin = Math.round(-5 + t01 * 6);  // -5 → +1
+    const driftMax = Math.round(-2 + t01 * 7);  // -2 → +5
+    const drift = rng.int(driftMin, driftMax);
     const yearLegacy = Math.max(50, Math.min(95, t.legacyBaseValue + drift));
     t.car = rollCarStats(rng, yearLegacy);
-    carEvolution.push({
-      teamId: t.id,
-      teamName: t.name,
-      teamColor: t.color,
-      before,
-      after: { ...t.car },
-    });
+    t.tempCarUpgrade = null;
   }
 
   // ---- 11) Run draft (worst-first based on the just-finished standings) ----
@@ -592,10 +618,23 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   state.freeAgentEngDirectorIds = draft.freeAgentEngDirectorIds;
   state.freeAgentRaceDirectorIds = draft.freeAgentRaceDirectorIds;
 
-  // ---- 12) Apply eng director boosts to new cars ----
+  // ---- 12) Car upgrade pass: teams with exactly 3 spare points upgrade their car ----
+  // Stored on the team as tempCarUpgrade so it can be reverted next preseason.
+  runCarUpgradePass(state.teams, state.drivers, state.engineeringDirectors, state.raceDirectors, rng);
+
+  // ---- 13) Build car evolution snapshot (after re-roll AND any temp upgrade) ----
+  const carEvolution: PreseasonData['carEvolution'] = state.teams.map(t => ({
+    teamId: t.id,
+    teamName: t.name,
+    teamColor: t.color,
+    before: carBefore[t.id],
+    after: { ...t.car },
+  }));
+
+  // ---- 14) Apply eng director boosts to new cars ----
   applyEngDirectorsToCars(state.teams, state.engineeringDirectors);
 
-  // ---- 13) Bump year, generate new calendar ----
+  // ---- 15) Bump year, generate new calendar ----
   state.calendar = createCalendar(rng);
   state.currentRound = 1;
   state.year++;
@@ -606,7 +645,7 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
 
   recalcStandings(state);
 
-  // ---- 14) Build and cache PreseasonData ----
+  // ---- 16) Build and cache PreseasonData ----
   const preseasonData: PreseasonData = {
     yearEnded: state.year - 1,
     championDriverId: championDriverId ?? '',

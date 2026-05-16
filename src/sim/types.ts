@@ -14,12 +14,17 @@ export const RARITY_COST: Record<Rarity, number> = {
 };
 
 // Target distribution of rarities in the 40-driver pool
+// Per-rarity targets for the active driver pool. With 12 teams × 3 driver slots
+// = 36 max signed drivers, plus free agents available for end-of-season market.
+// Sum of these targets centers around 52-55 so there's a healthy free agent
+// pool. Rares bumped up so there are enough mid-rarity options for the
+// replacement pass — teams should have credible upgrade targets each year.
 export const POOL_RARITY_TARGETS: Record<Rarity, [number, number]> = {
-  legend: [2, 3],
-  epic: [3, 4],
-  rare: [5, 6],
-  uncommon: [8, 10],
-  common: [17, 22], // fills the rest
+  legend: [3, 4],
+  epic: [5, 6],
+  rare: [10, 12],
+  uncommon: [11, 13],
+  common: [20, 25], // fills the rest
 };
 
 // ============================================================================
@@ -184,6 +189,17 @@ export interface CarStats {
   circuitSpecialty: CarSpecialty;
 }
 
+// Records the per-stat delta of a temporary car upgrade. Each value is the
+// number of points that were *added* to the corresponding car stat. Reverting
+// the upgrade subtracts these from `team.car`. Total adds to ~5 points (avg
+// of 4-6) spread across the four stats.
+export interface TempCarUpgrade {
+  maxSpeed: number;
+  acceleration: number;
+  turning: number;
+  reliability: number;
+}
+
 // One year's record for a team. Captures final standings + key stats.
 export interface TeamYearRecord {
   year: number;
@@ -216,6 +232,12 @@ export interface Team {
   engDirectorId: string | null;
   raceDirectorId: string | null;
   marketPoints: number;   // 13 or 17
+  // Temporary car upgrade purchased with spare budget points at end of preseason.
+  // Applied when a team has exactly 3 spare points after market resolves and can't
+  // sign anyone else. Reverts at the start of the next preseason — those points
+  // come back into the market budget so the team can spend them on people first.
+  // null means no temporary upgrade active.
+  tempCarUpgrade: TempCarUpgrade | null;
   // Season stats (reset annually)
   seasonPoints: number;
   seasonWins: number;

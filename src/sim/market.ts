@@ -1,6 +1,6 @@
 import {
   Team, Driver, EngineeringDirector, RaceDirector,
-  RARITY_COST, Rarity,
+  RARITY_COST, Rarity, TempCarUpgrade,
 } from './types';
 import { carStatsWithDirector } from './generators';
 import { RNG } from './rng';
@@ -213,43 +213,18 @@ export function runDraft(input: DraftInput, rng: RNG): DraftResult {
     if (!anyPicked) break;
   }
 
-  // Balance pass: any team with 5+ unused points "splurges" on a legend/epic driver
-  // from the free agent pool to use their budget headroom.
-  // This is bounded by the driving squad cap so a team can't end up Legend+Legend.
+  // ---- Replacement pass ----
+  // Bottom-up by previous standings: each team gets ONE chance to swap their
+  // weakest person (across drivers + directors) for a strictly higher-rarity
+  // free agent. Released people return to free agency. This drives the
+  // "rich-poor exploitation" — top teams raiding lesser teams via FA — and
+  // also keeps free agency churning rather than stagnating.
   for (const team of draftOrder) {
-    const rem = remainingPoints(team, drivers, engDirectors, raceDirectors);
-    if (rem < 5) continue;
-    const slots = vacantSlots(team);
-    const driverSlots = slots.filter(s => s === 'driver1' || s === 'driver2' || s === 'testDriver');
-    if (driverSlots.length === 0) continue;
-
-    const currentSquad = currentSquadCost(team, driverMap);
-    const squadHeadroom = DRIVING_SQUAD_CAP - currentSquad;
-    if (squadHeadroom <= 0) continue; // squad cap reached
-
-    const effectiveBudget = Math.min(rem, squadHeadroom);
-    const targets = ['legend', 'epic', 'rare'] as Rarity[];
-    for (const r of targets) {
-      if (RARITY_COST[r] > effectiveBudget) continue;
-      const fa = [...availDrivers]
-        .map(id => driverMap.get(id)!)
-        .filter(d => d.rarity === r);
-      if (fa.length === 0) continue;
-      const pick = rng.pick(fa);
-      const slot = driverSlots.includes('driver1') ? 'driver1'
-                 : driverSlots.includes('driver2') ? 'driver2'
-                 : 'testDriver';
-      assignToSlot(team, slot, pick.id);
-      availDrivers.delete(pick.id);
-      moves.push({
-        kind: 'driver_signed',
-        entityName: pick.name,
-        entityRarity: pick.rarity,
-        toTeam: team.name,
-        position: slot,
-      });
-      break;
-    }
+    runReplacementForTeam(
+      team, drivers, engDirectors, raceDirectors,
+      availDrivers, availEng, availRace,
+      driverMap, engMap, rdMap, moves
+    );
   }
 
   return {
@@ -258,6 +233,209 @@ export function runDraft(input: DraftInput, rng: RNG): DraftResult {
     freeAgentEngDirectorIds: [...availEng],
     freeAgentRaceDirectorIds: [...availRace],
   };
+}
+
+// One replacement attempt for a team. Looks at all 5 slots (driver1/2/test/eng/race)
+// and finds the slot where swapping the current person for a free agent gains the
+// most rarity. Performs at most one swap per call. Released person goes back to
+// the free agent pool (rule: free agency, not retirement).
+function runReplacementForTeam(
+  team: Team,
+  drivers: Driver[],
+  engDirectors: EngineeringDirector[],
+  raceDirectors: RaceDirector[],
+  availDrivers: Set<string>,
+  availEng: Set<string>,
+  availRace: Set<string>,
+  driverMap: Map<string, Driver>,
+  engMap: Map<string, EngineeringDirector>,
+  rdMap: Map<string, RaceDirector>,
+  moves: MarketMove[]
+): void {
+  // Build candidate swaps: for each slot, what's the best FA upgrade available?
+  type SwapCandidate = {
+    slot: 'driver1' | 'driver2' | 'testDriver' | 'engDirector' | 'raceDirector';
+    currentRarity: Rarity;
+    currentName: string;
+    currentId: string;
+    newId: string;
+    newName: string;
+    newRarity: Rarity;
+    rarityGain: number; // higher = bigger upgrade
+    netPointDelta: number; // RARITY_COST[new] - RARITY_COST[old], can be neg
+  };
+  const candidates: SwapCandidate[] = [];
+
+  // Helper: a swap is valid if (a) new rarity > current rarity, (b) team has
+  // enough budget AFTER the swap (currentSpare + freed cost - new cost >= 0),
+  // and for drivers (c) it respects the driving-squad cap.
+  const remBefore = remainingPoints(team, drivers, engDirectors, raceDirectors);
+
+  const driverSlots: Array<'driver1' | 'driver2' | 'testDriver'> = ['driver1', 'driver2', 'testDriver'];
+  for (const slot of driverSlots) {
+    const currentId = team[`${slot}Id` as 'driver1Id' | 'driver2Id' | 'testDriverId'];
+    if (!currentId) continue;
+    const current = driverMap.get(currentId);
+    if (!current) continue;
+    const currentCost = RARITY_COST[current.rarity];
+    // Find best FA driver with higher rarity that fits budget+cap after swap
+    const candidatesFA = [...availDrivers].map(id => driverMap.get(id)!).filter(d => {
+      if (rarityOrder(d.rarity) <= rarityOrder(current.rarity)) return false;
+      const newCost = RARITY_COST[d.rarity];
+      const netDelta = newCost - currentCost;
+      if (remBefore - netDelta < 0) return false;
+      // Check driving-squad cap with the swap applied
+      const newSquadCost = currentSquadCost(team, driverMap) - currentCost + newCost;
+      if (newSquadCost > DRIVING_SQUAD_CAP) return false;
+      return true;
+    });
+    const best = pickBestFA(candidatesFA);
+    if (best) {
+      candidates.push({
+        slot, currentRarity: current.rarity, currentName: current.name, currentId,
+        newId: best.id, newName: best.name, newRarity: best.rarity,
+        rarityGain: rarityOrder(best.rarity) - rarityOrder(current.rarity),
+        netPointDelta: RARITY_COST[best.rarity] - currentCost,
+      });
+    }
+  }
+
+  // Eng director slot
+  if (team.engDirectorId) {
+    const cur = engMap.get(team.engDirectorId);
+    if (cur) {
+      const currentCost = RARITY_COST[cur.rarity];
+      const candidatesFA = [...availEng].map(id => engMap.get(id)!).filter(e => {
+        if (rarityOrder(e.rarity) <= rarityOrder(cur.rarity)) return false;
+        const netDelta = RARITY_COST[e.rarity] - currentCost;
+        return remBefore - netDelta >= 0;
+      });
+      const best = pickBestFA(candidatesFA);
+      if (best) {
+        candidates.push({
+          slot: 'engDirector', currentRarity: cur.rarity, currentName: cur.name, currentId: cur.id,
+          newId: best.id, newName: best.name, newRarity: best.rarity,
+          rarityGain: rarityOrder(best.rarity) - rarityOrder(cur.rarity),
+          netPointDelta: RARITY_COST[best.rarity] - currentCost,
+        });
+      }
+    }
+  }
+  // Race director slot
+  if (team.raceDirectorId) {
+    const cur = rdMap.get(team.raceDirectorId);
+    if (cur) {
+      const currentCost = RARITY_COST[cur.rarity];
+      const candidatesFA = [...availRace].map(id => rdMap.get(id)!).filter(r => {
+        if (rarityOrder(r.rarity) <= rarityOrder(cur.rarity)) return false;
+        const netDelta = RARITY_COST[r.rarity] - currentCost;
+        return remBefore - netDelta >= 0;
+      });
+      const best = pickBestFA(candidatesFA);
+      if (best) {
+        candidates.push({
+          slot: 'raceDirector', currentRarity: cur.rarity, currentName: cur.name, currentId: cur.id,
+          newId: best.id, newName: best.name, newRarity: best.rarity,
+          rarityGain: rarityOrder(best.rarity) - rarityOrder(cur.rarity),
+          netPointDelta: RARITY_COST[best.rarity] - currentCost,
+        });
+      }
+    }
+  }
+
+  if (candidates.length === 0) return;
+
+  // Pick the swap with the biggest rarity gain. Tiebreak: prefer drivers
+  // (more central to gameplay) then by net point delta (smaller is preferred,
+  // i.e. cheaper upgrades win ties).
+  candidates.sort((a, b) => {
+    if (a.rarityGain !== b.rarityGain) return b.rarityGain - a.rarityGain;
+    const aIsDriver = a.slot === 'driver1' || a.slot === 'driver2' || a.slot === 'testDriver';
+    const bIsDriver = b.slot === 'driver1' || b.slot === 'driver2' || b.slot === 'testDriver';
+    if (aIsDriver !== bIsDriver) return aIsDriver ? -1 : 1;
+    return a.netPointDelta - b.netPointDelta;
+  });
+  const swap = candidates[0];
+
+  // Execute swap: release current → free agency, sign new
+  if (swap.slot === 'driver1' || swap.slot === 'driver2' || swap.slot === 'testDriver') {
+    availDrivers.add(swap.currentId);
+    moves.push({
+      kind: 'driver_released',
+      entityName: swap.currentName,
+      entityRarity: swap.currentRarity,
+      fromTeam: team.name,
+      position: swap.slot,
+    });
+    assignToSlot(team, swap.slot, swap.newId);
+    availDrivers.delete(swap.newId);
+    moves.push({
+      kind: 'driver_signed',
+      entityName: swap.newName,
+      entityRarity: swap.newRarity,
+      toTeam: team.name,
+      position: swap.slot,
+    });
+  } else if (swap.slot === 'engDirector') {
+    availEng.add(swap.currentId);
+    moves.push({
+      kind: 'director_released',
+      entityName: swap.currentName,
+      entityRarity: swap.currentRarity,
+      fromTeam: team.name,
+      position: 'engDirector',
+    });
+    team.engDirectorId = swap.newId;
+    availEng.delete(swap.newId);
+    moves.push({
+      kind: 'director_signed',
+      entityName: swap.newName,
+      entityRarity: swap.newRarity,
+      toTeam: team.name,
+      position: 'engDirector',
+    });
+  } else {
+    availRace.add(swap.currentId);
+    moves.push({
+      kind: 'director_released',
+      entityName: swap.currentName,
+      entityRarity: swap.currentRarity,
+      fromTeam: team.name,
+      position: 'raceDirector',
+    });
+    team.raceDirectorId = swap.newId;
+    availRace.delete(swap.newId);
+    moves.push({
+      kind: 'director_signed',
+      entityName: swap.newName,
+      entityRarity: swap.newRarity,
+      toTeam: team.name,
+      position: 'raceDirector',
+    });
+  }
+}
+
+function rarityOrder(r: Rarity): number {
+  switch (r) {
+    case 'common': return 1;
+    case 'uncommon': return 2;
+    case 'rare': return 3;
+    case 'epic': return 4;
+    case 'legend': return 5;
+  }
+}
+
+// Pick the highest-rarity FA from a list. Random tiebreak among equals at the
+// top to avoid deterministic same-pick-every-season patterns. For simplicity
+// the random tiebreak is just "first one we see" — input order is already
+// shuffled-ish from the Set iteration.
+function pickBestFA<T extends { rarity: Rarity }>(list: T[]): T | null {
+  if (list.length === 0) return null;
+  let best = list[0];
+  for (const x of list) {
+    if (rarityOrder(x.rarity) > rarityOrder(best.rarity)) best = x;
+  }
+  return best;
 }
 
 // Find the best entity for a given slot within the team's budget.
@@ -340,6 +518,72 @@ function canSignZeroCost(
     }
   }
   return false;
+}
+
+// Revert any temporary car upgrades — called at the START of preseason
+// before the market opens. Subtracts the previous year's upgrade values from
+// car stats and clears the field. The freed budget points naturally come
+// back because RARITY_COST sums + carPointCost will be lower next round.
+export function revertTempCarUpgrades(teams: Team[]): void {
+  for (const t of teams) {
+    if (!t.tempCarUpgrade) continue;
+    t.car.maxSpeed     = Math.max(0, t.car.maxSpeed     - t.tempCarUpgrade.maxSpeed);
+    t.car.acceleration = Math.max(0, t.car.acceleration - t.tempCarUpgrade.acceleration);
+    t.car.turning      = Math.max(0, t.car.turning      - t.tempCarUpgrade.turning);
+    t.car.reliability  = Math.max(0, t.car.reliability  - t.tempCarUpgrade.reliability);
+    t.tempCarUpgrade = null;
+  }
+}
+
+// Car upgrade pass — runs AFTER the regular draft + replacement pass.
+// Any team with EXACTLY 3 spare points (the most they can have without
+// being able to sign anyone meaningful — rare costs 2, uncommon 1, but if
+// they could replace someone they already did) spends those 3 points on a
+// ~5-point car upgrade distributed across the four stats. The upgrade is
+// stored on the team so it can be reverted next preseason.
+//
+// 3 spare is the trigger threshold — 4+ means they could still sign a legend
+// or epic from FA via the replacement pass, so we don't drain those.
+export function runCarUpgradePass(
+  teams: Team[],
+  drivers: Driver[],
+  engDirectors: EngineeringDirector[],
+  raceDirectors: RaceDirector[],
+  rng: RNG
+): void {
+  for (const t of teams) {
+    // Don't stack upgrades; revertTempCarUpgrades should have cleared any
+    // previous one before we get here, but skip if somehow still set.
+    if (t.tempCarUpgrade) continue;
+    const rem = remainingPoints(t, drivers, engDirectors, raceDirectors);
+    if (rem !== 3) continue;
+
+    // Distribute ~5 points across the 4 stats. Use 4-6 total (avg 5) for
+    // a bit of variety, weighted slightly toward more rather than less.
+    const total = rng.int(4, 6);
+    const distrib = distributeRandom(total, 4, rng);
+    const upgrade: TempCarUpgrade = {
+      maxSpeed:     distrib[0],
+      acceleration: distrib[1],
+      turning:      distrib[2],
+      reliability:  distrib[3],
+    };
+    t.car.maxSpeed     = Math.min(99, t.car.maxSpeed     + upgrade.maxSpeed);
+    t.car.acceleration = Math.min(99, t.car.acceleration + upgrade.acceleration);
+    t.car.turning      = Math.min(99, t.car.turning      + upgrade.turning);
+    t.car.reliability  = Math.min(99, t.car.reliability  + upgrade.reliability);
+    t.tempCarUpgrade = upgrade;
+  }
+}
+
+// Distribute `total` units randomly across `bins` bins, each ≥ 0.
+// Used for spreading car upgrade points across the 4 car stats.
+function distributeRandom(total: number, bins: number, rng: RNG): number[] {
+  const out = new Array(bins).fill(0);
+  for (let i = 0; i < total; i++) {
+    out[rng.int(0, bins - 1)]++;
+  }
+  return out;
 }
 
 // Apply post-director boost to car stats for the season.

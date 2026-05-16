@@ -188,11 +188,14 @@ function performanceRating(
       4.5;
   } else {
     // Race: meaningfully higher noise — pit stops, strategy, tire wear, traffic.
-    // This is what gives lower-rated entries a chance.
+    // This is what gives lower-rated entries a chance and prevents the "same
+    // driver wins 8 years in a row with 15+ wins" dynasty pattern. Tuned up
+    // so the best driver-car combo still wins the title most years, but the
+    // outcome of any individual race is less deterministic.
     noiseStd =
-      ctx.gp.weather === 'rain' ? 6.5 :
-      ctx.gp.weather === 'hot'  ? 4.5 :
-      3.8;
+      ctx.gp.weather === 'rain' ? 8.0 :
+      ctx.gp.weather === 'hot'  ? 6.0 :
+      5.3;
   }
   const noise = rng.normal(0, noiseStd);
 
@@ -289,27 +292,34 @@ export function simulateQualifying(
   }
 
   // Q2 ticks: reveal 4, then 7, then all 10
+  // Positions 11-24 were eliminated in Q1 — they're locked in their Q1
+  // order for the duration of Q2 regardless of what the top 10 are doing.
+  // Only the top 10 reshuffle as Q2 reveals; bottom 14 stay fixed.
   const q2Shuffled = rng.shuffle(q2Results);
   const q2Counts = [4, 7, 10];
-  // Q2 always shows the bottom14 from Q1 too (they don't improve)
   const bottom14Times: Record<string, number> = {};
+  const bottom14Ids = bottom14.map(r => r.driverId); // locked order P11..P24
   bottom14.forEach(r => { bottom14Times[r.driverId] = r.time; });
   for (const count of q2Counts) {
     const completed = q2Shuffled.slice(0, count);
     const partialQ2 = completed.slice().sort((a, b) => a.time - b.time);
     const tickTimes: Record<string, number> = { ...bottom14Times };
     partialQ2.forEach(r => { tickTimes[r.driverId] = r.time; });
-    // Drivers in q2 not yet shown: keep their q1 time for now
+    // Drivers in q2 not yet shown: keep their q1 time as placeholder
     q2Results.forEach(r => {
       if (!(r.driverId in tickTimes)) {
         const q1Time = q1Results.find(x => x.driverId === r.driverId)?.time;
         if (q1Time !== undefined) tickTimes[r.driverId] = q1Time;
       }
     });
-    // Ranking: sort all entries by time
-    const allRanked = Object.entries(tickTimes)
-      .sort((a, b) => a[1] - b[1])
-      .map(([id]) => id);
+    // Ranking: sort the 10 Q2 drivers by their current time, then append the
+    // 14 eliminated drivers in their fixed Q1 finishing order. Bottom 14 are
+    // out of the session — they should never reshuffle in Q2.
+    const q2DriverIds = q2Results.map(r => r.driverId);
+    const top10Ranked = q2DriverIds
+      .slice()
+      .sort((a, b) => tickTimes[a] - tickTimes[b]);
+    const allRanked = [...top10Ranked, ...bottom14Ids];
     ticks.push({
       stage: 'Q2',
       ranking: allRanked,

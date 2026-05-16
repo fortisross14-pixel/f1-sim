@@ -495,13 +495,31 @@ function MarketSection({ title, count, icon, tone, children }: {
 }
 
 function PreseasonCars({ data }: { data: PreseasonData }) {
+  // Helper: compute the overall (average) of a car's four stats. Used both
+  // for the new Overall column and for sorting the table from strongest to
+  // weakest car at year-end.
+  const overall = (c: { maxSpeed: number; acceleration: number; turning: number; reliability: number }) =>
+    Math.round((c.maxSpeed + c.acceleration + c.turning + c.reliability) / 4);
+
+  // Sort by post-evolution overall descending so the strongest cars are at the top
+  const rows = [...data.carEvolution].sort((a, b) => overall(b.after) - overall(a.after));
+
   return (
     <>
       <h3>Car evolution {data.yearEnded} → {data.yearEnded + 1}</h3>
       <table className="data-table cars-table">
-        <thead><tr><th>Team</th><th>Speed</th><th>Accel</th><th>Turn</th><th>Reliab</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th>Overall</th>
+            <th>Speed</th>
+            <th>Accel</th>
+            <th>Turn</th>
+            <th>Reliab</th>
+          </tr>
+        </thead>
         <tbody>
-          {data.carEvolution.map(c => (
+          {rows.map(c => (
             <tr key={c.teamId}>
               <td>
                 <span className="team-cell">
@@ -509,6 +527,7 @@ function PreseasonCars({ data }: { data: PreseasonData }) {
                   <span style={{ color: c.teamColor, fontWeight: 600 }}>{c.teamName}</span>
                 </span>
               </td>
+              <td><Delta before={overall(c.before)} after={overall(c.after)} bold /></td>
               <td><Delta before={c.before.maxSpeed} after={c.after.maxSpeed} /></td>
               <td><Delta before={c.before.acceleration} after={c.after.acceleration} /></td>
               <td><Delta before={c.before.turning} after={c.after.turning} /></td>
@@ -517,12 +536,12 @@ function PreseasonCars({ data }: { data: PreseasonData }) {
           ))}
         </tbody>
       </table>
-      <p className="muted">Stats above are pre-engineering-director boost.</p>
+      <p className="muted">Stats above are pre-engineering-director boost. Overall = average of the four stats.</p>
     </>
   );
 }
 
-function Delta({ before, after }: { before: number; after: number }) {
+function Delta({ before, after, bold }: { before: number; after: number; bold?: boolean }) {
   const diff = after - before;
   const magnitude = Math.abs(diff);
   // Color intensity by magnitude: tiny changes muted, big swings bold
@@ -530,7 +549,7 @@ function Delta({ before, after }: { before: number; after: number }) {
   if (diff > 0) cls = magnitude >= 5 ? 'delta-up-strong' : 'delta-up';
   else if (diff < 0) cls = magnitude >= 5 ? 'delta-down-strong' : 'delta-down';
   return (
-    <span className="cars-delta">
+    <span className={`cars-delta ${bold ? 'cars-delta-overall' : ''}`}>
       <span className="cars-delta-before">{before}</span>
       <span className="cars-delta-arrow">→</span>
       <span className="cars-delta-after">{after}</span>

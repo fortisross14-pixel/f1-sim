@@ -11,25 +11,194 @@ import { Flag } from '../common/Flag';
 import { TeamLogo } from '../common/TeamLogo';
 import { rarityOrder, toggleSort } from '../common/helpers';
 
-type HistorySubTab = 'drivers' | 'directors' | 'teams';
+type HistorySubTab = 'wc' | 'drivers' | 'directors' | 'teams';
 type HistoryFilter = 'active' | 'retired' | 'all';
 
-// History tab — three sub-tabs (Drivers, Directors, Teams).
-// All three offer Active/Retired/All filters and sortable columns.
+// History tab — four sub-tabs: World Championships (year-by-year title roster),
+// Drivers, Directors, Teams. All offer sortable columns; the latter three offer
+// Active/Retired/All filters.
 export function HistoryTab() {
-  const [sub, setSub] = useState<HistorySubTab>('drivers');
+  const [sub, setSub] = useState<HistorySubTab>('wc');
   return (
     <div className="screen">
       <h2>History</h2>
       <div className="sub-tabs">
+        <button onClick={() => setSub('wc')} className={sub === 'wc' ? 'active' : ''}>World Championships</button>
         <button onClick={() => setSub('drivers')} className={sub === 'drivers' ? 'active' : ''}>Drivers</button>
         <button onClick={() => setSub('directors')} className={sub === 'directors' ? 'active' : ''}>Directors</button>
         <button onClick={() => setSub('teams')} className={sub === 'teams' ? 'active' : ''}>Teams</button>
       </div>
+      {sub === 'wc' && <ChampionshipHistory />}
       {sub === 'drivers' && <DriverHistory />}
       {sub === 'directors' && <DirectorHistory />}
       {sub === 'teams' && <TeamHistory />}
     </div>
+  );
+}
+
+// ============================================================================
+// WORLD CHAMPIONSHIPS SUB-TAB
+// ============================================================================
+// Year-by-year roll-call of every WDC + WCC since universe creation.
+// Walks each team's yearHistory to find which won the constructor title each
+// year, and each driver's yearHistory (both active and retired) for the WDC.
+function ChampionshipHistory() {
+  const { state } = useGame();
+
+  // Build a year → champion record. Walking drivers + retiredDrivers ensures
+  // we catch champions who have since retired (their yearHistory persists).
+  type ChampRow = {
+    year: number;
+    driverChampionName: string | null;
+    driverChampionTeamName: string | null;
+    driverChampionTeamColor: string | null;
+    driverChampionPoints: number;
+    driverChampionRarity: string | null;
+    constructorChampionName: string | null;
+    constructorChampionColor: string | null;
+    constructorChampionPoints: number;
+  };
+  const rowByYear = new Map<number, ChampRow>();
+  const ensure = (year: number): ChampRow => {
+    if (!rowByYear.has(year)) {
+      rowByYear.set(year, {
+        year,
+        driverChampionName: null,
+        driverChampionTeamName: null,
+        driverChampionTeamColor: null,
+        driverChampionPoints: 0,
+        driverChampionRarity: null,
+        constructorChampionName: null,
+        constructorChampionColor: null,
+        constructorChampionPoints: 0,
+      });
+    }
+    return rowByYear.get(year)!;
+  };
+
+  // Driver champions (across active + retired)
+  const allDrivers = [...state.drivers, ...state.retiredDrivers];
+  for (const d of allDrivers) {
+    for (const y of d.yearHistory) {
+      if (!y.isWorldChampion) continue;
+      const row = ensure(y.year);
+      row.driverChampionName = d.name;
+      row.driverChampionTeamName = y.teamName;
+      row.driverChampionPoints = y.points;
+      row.driverChampionRarity = y.rarityAtTime;
+      // Team color: look up by current team list. Teams persist across years,
+      // unlike drivers, so this should usually resolve. Falls back to gray.
+      const team = state.teams.find(t => t.id === y.teamId);
+      row.driverChampionTeamColor = team?.color ?? '#888';
+    }
+  }
+  // Constructor champions
+  for (const t of state.teams) {
+    for (const y of t.yearHistory) {
+      if (!y.constructorWC) continue;
+      const row = ensure(y.year);
+      row.constructorChampionName = t.name;
+      row.constructorChampionColor = t.color;
+      row.constructorChampionPoints = y.points;
+    }
+  }
+
+  // Sorted: most recent year first
+  const rows = [...rowByYear.values()].sort((a, b) => b.year - a.year);
+
+  // Aggregate driver / constructor title counts for the small leaderboard
+  const driverTitleCount = new Map<string, number>();
+  const constructorTitleCount = new Map<string, number>();
+  for (const r of rows) {
+    if (r.driverChampionName) {
+      driverTitleCount.set(r.driverChampionName, (driverTitleCount.get(r.driverChampionName) ?? 0) + 1);
+    }
+    if (r.constructorChampionName) {
+      constructorTitleCount.set(r.constructorChampionName, (constructorTitleCount.get(r.constructorChampionName) ?? 0) + 1);
+    }
+  }
+  const topDriver = [...driverTitleCount.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topConstructor = [...constructorTitleCount.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  if (rows.length === 0) {
+    return (
+      <p className="muted">No championships have been decided yet. Finish a season to see the first entry here.</p>
+    );
+  }
+
+  return (
+    <>
+      <div className="wc-summary-row">
+        <div className="wc-summary-card">
+          <div className="wc-summary-label">Seasons played</div>
+          <div className="wc-summary-value">{rows.length}</div>
+        </div>
+        {topDriver && (
+          <div className="wc-summary-card">
+            <div className="wc-summary-label">Most Drivers' titles</div>
+            <div className="wc-summary-value-name">{topDriver[0]}</div>
+            <div className="wc-summary-sub">{topDriver[1]} title{topDriver[1] === 1 ? '' : 's'}</div>
+          </div>
+        )}
+        {topConstructor && (
+          <div className="wc-summary-card">
+            <div className="wc-summary-label">Most Constructors' titles</div>
+            <div className="wc-summary-value-name">{topConstructor[0]}</div>
+            <div className="wc-summary-sub">{topConstructor[1]} title{topConstructor[1] === 1 ? '' : 's'}</div>
+          </div>
+        )}
+      </div>
+
+      <table className="data-table history-list-table wc-table">
+        <thead>
+          <tr>
+            <th>Year</th>
+            <th>Drivers' Champion</th>
+            <th>Team</th>
+            <th className="num">Pts</th>
+            <th>Constructors' Champion</th>
+            <th className="num">Pts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.year} className="wc-row">
+              <td><span className="wc-year">{r.year}</span></td>
+              <td>
+                {r.driverChampionName ? (
+                  <span className="wc-champion-cell">
+                    <span className="trophy">🏆</span>
+                    <span className="wc-champion-name">{r.driverChampionName}</span>
+                    {r.driverChampionRarity && (
+                      <span className={`rarity rarity-${r.driverChampionRarity}`}>{r.driverChampionRarity}</span>
+                    )}
+                  </span>
+                ) : <span className="muted">—</span>}
+              </td>
+              <td>
+                {r.driverChampionTeamName && (
+                  <span style={{ color: r.driverChampionTeamColor ?? undefined, fontWeight: 600 }}>
+                    {r.driverChampionTeamName}
+                  </span>
+                )}
+              </td>
+              <td className="num"><strong>{r.driverChampionPoints || '—'}</strong></td>
+              <td>
+                {r.constructorChampionName ? (
+                  <span className="wc-champion-cell">
+                    <span className="trophy">🏭</span>
+                    <span style={{ color: r.constructorChampionColor ?? undefined, fontWeight: 600 }}>
+                      {r.constructorChampionName}
+                    </span>
+                  </span>
+                ) : <span className="muted">—</span>}
+              </td>
+              <td className="num"><strong>{r.constructorChampionPoints || '—'}</strong></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }
 
