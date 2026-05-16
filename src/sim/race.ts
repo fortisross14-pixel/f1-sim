@@ -98,12 +98,15 @@ function archetypePhaseMod(d: Driver, phase: 'quali' | 'race'): number {
 }
 
 // Rarity-scaled qualifying bonus. Common/uncommon stay at +3; rare+ scale up
-// so an epic qualifier can land on the front row even with a mid-tier car.
+// modestly so a rare/epic qualifier mixes it with the front in Q without
+// outright dominating. Tuned down from an earlier version where +9 legend
+// bonus single-handedly overcame both car gap and driver-skill gap, making
+// a legend qualifier win every Q regardless of teammates' cars.
 function qualifierBonus(rarity: Rarity): number {
   switch (rarity) {
-    case 'legend':   return 9;
-    case 'epic':     return 7;
-    case 'rare':     return 5;
+    case 'legend':   return 6;
+    case 'epic':     return 5;
+    case 'rare':     return 4;
     case 'uncommon': return 3;
     case 'common':   return 3;
   }
@@ -175,11 +178,14 @@ function performanceRating(
   // genuine upsets (a top car + top driver shouldn't win 75% of races).
   let noiseStd: number;
   if (phase === 'quali') {
-    // Quali: top teams should mostly get pole; lower noise.
+    // Quali noise: previous values (2.0 normal) had one driver winning
+    // 70-90% of poles across a season — way more deterministic than real F1
+    // where a top driver gets ~40% of poles. Bumped substantially so the
+    // best driver-car combo still leads the pole count but doesn't sweep.
     noiseStd =
-      ctx.gp.weather === 'rain' ? 4.5 :
-      ctx.gp.weather === 'hot'  ? 2.5 :
-      2.0;
+      ctx.gp.weather === 'rain' ? 7.0 :
+      ctx.gp.weather === 'hot'  ? 5.0 :
+      4.5;
   } else {
     // Race: meaningfully higher noise — pit stops, strategy, tire wear, traffic.
     // This is what gives lower-rated entries a chance.
