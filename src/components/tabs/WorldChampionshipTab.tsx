@@ -336,6 +336,7 @@ function PreseasonSummary({ data }: { data: PreseasonData }) {
   useEffect(() => { audio.play('champion'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mostWins = data.finalDriverStandings.find(d => d.driverId === data.mostWinsDriverId);
+  const mostPoles = data.finalDriverStandings.find(d => d.driverId === data.mostPolesDriverId);
   const rookie = data.rookieOfYearDriverId
     ? data.finalDriverStandings.find(d => d.driverId === data.rookieOfYearDriverId)
     : null;
@@ -365,6 +366,12 @@ function PreseasonSummary({ data }: { data: PreseasonData }) {
           <div className="award-card-label">Most Wins</div>
           <div className="award-card-value">{mostWins?.driverName ?? '—'}</div>
           <div className="award-card-meta">{mostWins?.wins ?? 0} wins</div>
+        </div>
+        <div className="award-card award-card-poles">
+          <div className="award-card-icon">⏱</div>
+          <div className="award-card-label">Most Pole Positions</div>
+          <div className="award-card-value">{mostPoles?.driverName ?? '—'}</div>
+          <div className="award-card-meta">{data.mostPolesCount} pole{data.mostPolesCount === 1 ? '' : 's'}</div>
         </div>
         {rookie && (
           <div className="award-card award-card-rookie">

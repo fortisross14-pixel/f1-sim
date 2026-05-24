@@ -202,7 +202,33 @@ function performanceRating(
   return base + raceDirBonus + weatherMod + phaseMod + specialtyMod + noise;
 }
 
-// Car specialty → circuit profile bonus. Matching specialty gives the car
+// Grid inertia: how much your starting position still helps you, by segment.
+// Returns a per-lap rating-equivalent bonus. Multiply by segLength at the call
+// site to get a segment score contribution.
+//
+// The model: track position is "sticky". At the start (seg 1) it's very sticky
+// — you mostly hold station, big overtakes are rare. As the race unfolds the
+// stickiness fades and raw pace takes over; by the final segment grid position
+// barely matters.
+//
+// Tuning: the seg-1 spread between pole (gridPos 0) and P24 is ~9 rating points.
+// A typical car-to-car pace gap is ~2-5 rating. So in the opening laps a P16
+// starter simply cannot have enough pace edge to reach the lead — but a fast
+// car will steadily climb as inertia decays over segments 2-4. A slow car
+// starting on pole will get swallowed, just not on lap 1.
+function gridInertiaBonus(gridPos: number, seg: number): number {
+  // Per-segment weight: how strongly grid position matters in this segment.
+  // seg 1 = opening 3 laps (very sticky), tapering to near-zero by the end.
+  const segWeight = [1.0, 0.55, 0.30, 0.12, 0.04][seg - 1] ?? 0;
+  // Linear ramp from pole (+) to back of grid (−), centered so mid-grid ≈ 0.
+  // gridPos 0 → +4.5, gridPos 11.5 → 0, gridPos 23 → −4.5 (at seg weight 1.0)
+  const MID = 11.5;
+  const SPREAD = 4.5; // half-spread in rating points at full seg weight
+  const positional = ((MID - gridPos) / MID) * SPREAD;
+  return positional * segWeight;
+}
+
+
 // ~0.5s/lap. All-rounder gets a quarter of that bonus on every circuit so
 // it's never disadvantaged but never optimal either. Mismatch = 0.
 function carSpecialtyBonus(carSpec: CarSpecialty, profile: CircuitProfile): number {
@@ -432,13 +458,15 @@ export function simulateRace(
   const segmentLengths = [3, 15, 15, 15, 2]; // sums to 50
   const segments = segmentLengths.length;
 
-  // Per-segment "scores" for each driver. Position at each segment is ranked by accumulated score.
+  // Per-segment "scores" for each driver. Position at each segment is ranked by
+  // accumulated score. Each driver also carries a "grid inertia" value derived
+  // from their qualifying position — see gridInertiaBonus below.
   const scores = new Map<string, number>();
+  const gridPosByDriver = new Map<string, number>();
   entrants.forEach(e => {
-    // Initial score reflects starting grid: pole position gets a small head start
-    const gridPos = qualifying.ranking.indexOf(e.driver.id);
-    const gridBonus = (24 - gridPos) * 0.3; // pos 1 gets +7.2, pos 24 gets +0.3
-    scores.set(e.driver.id, gridBonus);
+    const gridPos = qualifying.ranking.indexOf(e.driver.id); // 0 = pole
+    gridPosByDriver.set(e.driver.id, gridPos);
+    scores.set(e.driver.id, 0);
   });
 
   // Track fastest single-segment performance for "fastest lap"
@@ -459,11 +487,30 @@ export function simulateRace(
       // Segment scoring: scale both baseline and noise by segment length.
       // A 15-lap segment contributes ~5x the score of a 3-lap segment, both for
       // baseline pace AND for variance (more laps = more chances for things to happen).
-      // Noise scales as sqrt(segLength) (independent events accumulate variance).
       const lengthFactor = segLength;
-      const noiseStdBase = gp.weather === 'rain' ? 3.5 : 2.5 - seg * 0.15;
+
+      // Opening-lap noise is now LOWER than mid-race, not higher. The start is
+      // about holding grid position; the chaos of overtaking builds through the
+      // race. seg 1 (laps 1-3) gets the calmest noise; mid-race the most.
+      // Previous code had this backwards (highest noise at the start).
+      const noiseProfile = [1.4, 2.6, 2.8, 2.5, 1.8]; // per-segment noise multiplier
+      const noiseStdBase = (gp.weather === 'rain' ? 3.5 : 2.5) * (noiseProfile[seg - 1] / 2.5);
       const noiseStd = noiseStdBase * Math.sqrt(segLength);
       const segNoise = rng.normal(0, noiseStd);
+
+      // ---- Grid inertia ----
+      // Your qualifying position carries real weight, heaviest at the start and
+      // decaying as the race unfolds. This is what makes pole matter: a P1 starter
+      // has a big score cushion in segment 1, a moderate one through the middle,
+      // and almost none by the final laps (pure pace decides the finish).
+      //
+      // The bonus is expressed in the same units as a segment score (rating ×
+      // lengthFactor), so it's directly comparable. At seg 1 the inertia gap
+      // between P1 and P24 is large enough that a midfield car can't leapfrog
+      // to the lead in 3 laps — but a strong car CAN climb steadily over the
+      // full distance.
+      const gridPos = gridPosByDriver.get(e.driver.id) ?? 12; // 0 = pole
+      const inertia = gridInertiaBonus(gridPos, seg) * lengthFactor;
 
       // Clutch archetype: late-race boost (now seg 4 = last 15 laps, seg 5 = final 3)
       let archMod = 0;
@@ -480,7 +527,7 @@ export function simulateRace(
         archMod -= 0.5;
       }
 
-      const segScore = baseRating * lengthFactor + segNoise + archMod * lengthFactor;
+      const segScore = baseRating * lengthFactor + segNoise + archMod * lengthFactor + inertia;
       scores.set(e.driver.id, scores.get(e.driver.id)! + segScore);
 
       // Check for fastest lap: normalize by segment length to compare segments fairly

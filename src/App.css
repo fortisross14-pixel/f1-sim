@@ -2237,6 +2237,7 @@ th.sortable:hover { background: var(--bg-hover); color: var(--text-primary); }
 }
 .award-card-constructor { border-top: 3px solid #2563EB; }
 .award-card-wins { border-top: 3px solid #F59E0B; }
+.award-card-poles { border-top: 3px solid #9333EA; }
 .award-card-rookie { border-top: 3px solid var(--green); }
 
 /* ============================================================================

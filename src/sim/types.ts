@@ -351,6 +351,8 @@ export interface PreseasonData {
   championDriverName: string;
   constructorChampionTeamId: string;
   mostWinsDriverId: string;
+  mostPolesDriverId: string;     // driver with the most pole positions this season
+  mostPolesCount: number;        // how many poles they took
   rookieOfYearDriverId: string | null;
   finalDriverStandings: Array<{ driverId: string; driverName: string; teamName: string; points: number; wins: number }>;
   finalTeamStandings: Array<{ teamId: string; teamName: string; points: number; wins: number }>;

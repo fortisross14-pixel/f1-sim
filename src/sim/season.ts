@@ -399,6 +399,7 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   }
   const championDriver = championDriverId ? driverMap.get(championDriverId) : undefined;
   const mostWinsDriver = state.drivers.slice().sort((a, b) => b.seasonWins - a.seasonWins)[0];
+  const mostPolesDriver = state.drivers.slice().sort((a, b) => b.seasonPoles - a.seasonPoles)[0];
   const rookies = state.drivers.filter(d => d.age - d.careerStartAge === 0);
   const roy = rookies.length
     ? rookies.slice().sort((a, b) => b.seasonPoints - a.seasonPoints)[0]
@@ -652,6 +653,8 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     championDriverName: championDriver?.name ?? '—',
     constructorChampionTeamId: constructorChampTeamId ?? '',
     mostWinsDriverId: mostWinsDriver?.id ?? '',
+    mostPolesDriverId: mostPolesDriver?.id ?? '',
+    mostPolesCount: mostPolesDriver?.seasonPoles ?? 0,
     rookieOfYearDriverId: roy?.id ?? null,
     finalDriverStandings,
     finalTeamStandings,
