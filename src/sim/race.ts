@@ -189,13 +189,15 @@ function performanceRating(
   } else {
     // Race: meaningfully higher noise — pit stops, strategy, tire wear, traffic.
     // This is what gives lower-rated entries a chance and prevents the "same
-    // driver wins 8 years in a row with 15+ wins" dynasty pattern. Tuned up
-    // so the best driver-car combo still wins the title most years, but the
-    // outcome of any individual race is less deterministic.
+    // driver wins 8 years in a row" dynasty pattern. It also compresses the
+    // championship points gap — without enough race-to-race variance the top
+    // car locks out P1-P2 every weekend and the title is decided with races
+    // to spare. Tuned so the best combo still wins most races but has genuine
+    // off-days.
     noiseStd =
-      ctx.gp.weather === 'rain' ? 8.0 :
-      ctx.gp.weather === 'hot'  ? 6.0 :
-      5.3;
+      ctx.gp.weather === 'rain' ? 8.5 :
+      ctx.gp.weather === 'hot'  ? 6.5 :
+      5.9;
   }
   const noise = rng.normal(0, noiseStd);
 

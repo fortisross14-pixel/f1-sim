@@ -11,6 +11,8 @@ import {
 } from './generators';
 import {
   runDraft, applyEngDirectorsToCars, runInitialAssignment, runCarUpgradePass,
+  updateChampionStreaks, runDriverLoyaltyShuffle, enforceCapCompliance,
+  applyDoubleChampionCarRegression, revertTempCarUpgrades,
 } from './market';
 import { RNG } from './rng';
 
@@ -379,6 +381,20 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   const championDriverId = state.driverStandings[0]?.driverId;
   const constructorChampTeamId = state.teamStandings[0]?.teamId;
 
+  // The team whose driver won the WDC — needed for the championship-streak
+  // cap penalty. Found by scanning team rosters for the champion driver.
+  let wdcTeamId: string | null = null;
+  if (championDriverId) {
+    for (const t of state.teams) {
+      if (t.driver1Id === championDriverId || t.driver2Id === championDriverId || t.testDriverId === championDriverId) {
+        wdcTeamId = t.id;
+        break;
+      }
+    }
+  }
+  // A team won the "double" if it took both the WDC and the WCC.
+  const doubleChampTeamId = (wdcTeamId && wdcTeamId === constructorChampTeamId) ? wdcTeamId : null;
+
   // ---- 2) Credit the champion ----
   if (championDriverId) {
     const champ = state.drivers.find(d => d.id === championDriverId);
@@ -542,20 +558,21 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     state.raceDirectors.push(createRaceDirector(rng, rarity));
   }
 
-  // ---- 10) Re-roll cars ----
-  // Clearing tempCarUpgrade: re-rolling t.car implicitly removed the previous
-  // year's upgrade (it was baked into the previous car stats, which are now
-  // replaced wholesale). The Team-level marker is set to null so the next
-  // pass can apply a fresh upgrade if conditions are met.
+  // ---- 10) Update championship streaks ----
+  // Must run before the draft so effectiveCap reflects the new penalty.
+  // The WDC team's streak grows by 1; everyone else resets to 0 (cap restored).
+  updateChampionStreaks(state.teams, wdcTeamId);
+
+  // ---- 11) Re-roll cars ----
+  // tempCarUpgrade is reverted implicitly here — re-rolling t.car replaces the
+  // previous car wholesale, so the previous year's temp upgrade is gone. The
+  // Team-level marker is set to null so a fresh upgrade can be applied later.
   //
   // Drift is biased by finishing position to prevent dynasty compounding.
-  // The reigning constructors champion gets the harshest pullback (typically
-  // -3 to -5), bottom teams a meaningful boost (+0 to +5). This is the F1
-  // reality: when you're winning, rivals copy your design and catch up; when
-  // you're losing, you invest in radical redesigns and benefit from regulation
-  // changes. Critically, this breaks the "same driver wins 8+ in a row"
-  // pattern by ensuring even the strongest team's car regresses meaningfully
-  // each year — they have to rebuild dominance, not just inherit it.
+  // The reigning constructors champion gets the harshest pullback, bottom
+  // teams a meaningful boost — the F1 reality of rivals copying winning designs
+  // while backmarkers benefit from radical redesigns. A team that won BOTH
+  // titles takes an additional guaranteed regression on top of this.
   const positionByTeam = new Map<string, number>();
   state.teamStandings.forEach((s, i) => positionByTeam.set(s.teamId, i + 1));
   const carBefore: Record<string, CarStats> = {};
@@ -566,10 +583,6 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     //   P1  → [-5, -2]  (champion regression)
     //   P6  → [-2, +2]  (mid-pack: normal variance)
     //   P12 → [+1, +5]  (cellar dweller: meaningful boost)
-    // Interpolated linearly between P1 and P12. The total range per team stays
-    // around 4 points, so individual cars still feel re-rolled rather than
-    // shuffled-by-fiat, but the expected direction is strong enough to prevent
-    // dynasty compounding.
     const t01 = (pos - 1) / 11; // 0 at P1, 1 at P12
     const driftMin = Math.round(-5 + t01 * 6);  // -5 → +1
     const driftMax = Math.round(-2 + t01 * 7);  // -2 → +5
@@ -577,7 +590,18 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     const yearLegacy = Math.max(50, Math.min(95, t.legacyBaseValue + drift));
     t.car = rollCarStats(rng, yearLegacy);
     t.tempCarUpgrade = null;
+    // Double champion: guaranteed extra car regression, no randomness in
+    // whether it happens (only in the stat distribution).
+    if (doubleChampTeamId && t.id === doubleChampTeamId) {
+      applyDoubleChampionCarRegression(t.car, rng);
+    }
   }
+
+  // ---- 11b) Driver loyalty shuffle ----
+  // Some drivers request a move and enter free agency before the draft.
+  const loyaltyDepartures = runDriverLoyaltyShuffle(
+    state.teams, state.drivers, constructorChampTeamId ?? null, rng
+  );
 
   // ---- 11) Run draft (worst-first based on the just-finished standings) ----
   const worstFirst = state.teamStandings.slice().reverse().map(s => s.teamId);
@@ -619,11 +643,45 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   state.freeAgentEngDirectorIds = draft.freeAgentEngDirectorIds;
   state.freeAgentRaceDirectorIds = draft.freeAgentRaceDirectorIds;
 
-  // ---- 12) Car upgrade pass: teams with exactly 3 spare points upgrade their car ----
+  // ---- 12) Off-season cap enforcement ----
+  // After the draft + replacement passes, force every team within its
+  // effective cap (which may be reduced by the championship streak penalty).
+  // Resolution: release the strongest person to free agency, repeat until
+  // legal; only regress the car as a last resort. This is what makes the
+  // champion cap penalty bite — a docked team is forced to shed a star.
+  const capReleases = enforceCapCompliance(
+    state.teams, state.drivers, state.engineeringDirectors, state.raceDirectors
+  );
+  // Fold loyalty departures + cap-enforcement releases into the preseason
+  // releases report so they show up in the Market sub-tab.
+  for (const dep of loyaltyDepartures) {
+    releases.push({ name: dep.name, rarity: dep.rarity, fromTeam: dep.fromTeam, kind: 'driver' });
+  }
+  for (const rel of capReleases) {
+    releases.push({ name: rel.name, rarity: rel.rarity, fromTeam: rel.fromTeam, kind: rel.kind });
+  }
+  // Rebuild free agent lists — cap enforcement may have released people.
+  {
+    const assignedD = new Set<string>();
+    const assignedE = new Set<string>();
+    const assignedR = new Set<string>();
+    for (const t of state.teams) {
+      if (t.driver1Id) assignedD.add(t.driver1Id);
+      if (t.driver2Id) assignedD.add(t.driver2Id);
+      if (t.testDriverId) assignedD.add(t.testDriverId);
+      if (t.engDirectorId) assignedE.add(t.engDirectorId);
+      if (t.raceDirectorId) assignedR.add(t.raceDirectorId);
+    }
+    state.freeAgentDriverIds = state.drivers.filter(d => !assignedD.has(d.id)).map(d => d.id);
+    state.freeAgentEngDirectorIds = state.engineeringDirectors.filter(e => !assignedE.has(e.id)).map(e => e.id);
+    state.freeAgentRaceDirectorIds = state.raceDirectors.filter(r => !assignedR.has(r.id)).map(r => r.id);
+  }
+
+  // ---- 13) Car upgrade pass: teams with exactly 3 spare points upgrade their car ----
   // Stored on the team as tempCarUpgrade so it can be reverted next preseason.
   runCarUpgradePass(state.teams, state.drivers, state.engineeringDirectors, state.raceDirectors, rng);
 
-  // ---- 13) Build car evolution snapshot (after re-roll AND any temp upgrade) ----
+  // ---- 14) Build car evolution snapshot (after re-roll AND any temp upgrade) ----
   const carEvolution: PreseasonData['carEvolution'] = state.teams.map(t => ({
     teamId: t.id,
     teamName: t.name,
@@ -632,7 +690,7 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     after: { ...t.car },
   }));
 
-  // ---- 14) Apply eng director boosts to new cars ----
+  // ---- 15) Apply eng director boosts to new cars ----
   applyEngDirectorsToCars(state.teams, state.engineeringDirectors);
 
   // ---- 15) Bump year, generate new calendar ----

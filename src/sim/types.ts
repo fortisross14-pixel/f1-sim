@@ -231,7 +231,13 @@ export interface Team {
   testDriverId: string | null;
   engDirectorId: string | null;
   raceDirectorId: string | null;
-  marketPoints: number;   // 13 or 17
+  marketPoints: number;   // base cap: 13 or 17
+  // Consecutive Drivers' Championship streak for this team. Each consecutive
+  // year one of this team's drivers wins the WDC, this increments. The team's
+  // effective cap is reduced by this amount (unbounded — a 4-time champion
+  // runs at marketPoints − 4). Resets to 0 the first year they don't win the
+  // WDC, restoring the full cap in one swing. This is the core dynasty-breaker.
+  championStreak: number;
   // Temporary car upgrade purchased with spare budget points at end of preseason.
   // Applied when a team has exactly 3 spare points after market resolves and can't
   // sign anyone else. Reverts at the start of the next preseason — those points

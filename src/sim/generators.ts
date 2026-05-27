@@ -14,11 +14,22 @@ import { COUNTRIES, CountryEntry, rollCountry, rollNameForCountry } from './coun
 // These overlap a bit so rarity doesn't fully determine outcome.
 // ============================================================================
 
+// Driver skill ranges by rarity. Ranges overlap deliberately so rarity is a
+// strong signal but not a full determinant of outcome.
+//
+// The legend/epic bands are intentionally close (legend mid ≈ 91, epic mid ≈
+// 87 — a ~4pt gap, down from the old 7.5pt gap). This lets an epic driver in
+// a top car genuinely challenge a legend, and a legend in a 2nd-tier car stay
+// within striking distance. Per the target competitive balance:
+//   - legend in top car wins ~60% of WCs
+//   - epic in top car wins ~25%
+//   - legend in 2nd-tier car wins ~15%
+//   - epic in 2nd-tier car: a race win is possible, a title is not
 const DRIVER_SKILL_RANGE: Record<Rarity, [number, number]> = {
-  legend:   [88, 99],
-  epic:     [80, 92],
-  rare:     [72, 85],
-  uncommon: [62, 78],
+  legend:   [88, 95],
+  epic:     [83, 91],
+  rare:     [74, 85],
+  uncommon: [64, 78],
   common:   [50, 70],
 };
 
@@ -301,6 +312,7 @@ export function createTeams(rng: RNG): Team[] {
     engDirectorId: null,
     raceDirectorId: null,
     marketPoints: t.tier === 'top' ? 17 : 13,
+    championStreak: 0,
     tempCarUpgrade: null,
     seasonPoints: 0,
     seasonWins: 0,

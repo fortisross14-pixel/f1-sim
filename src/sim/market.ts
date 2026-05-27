@@ -1,6 +1,6 @@
 import {
   Team, Driver, EngineeringDirector, RaceDirector,
-  RARITY_COST, Rarity, TempCarUpgrade,
+  RARITY_COST, Rarity, TempCarUpgrade, CarStats,
 } from './types';
 import { carStatsWithDirector } from './generators';
 import { RNG } from './rng';
@@ -65,13 +65,22 @@ export function currentPersonnelCost(
   return cost;
 }
 
+// A team's effective budget cap for the season. Base cap (13 or 17) minus
+// the championship-streak penalty: each consecutive WDC costs 1 cap point,
+// unbounded. A 4-time-champion team runs at base − 4, which typically forces
+// them to sell a legend or epic. The penalty vanishes entirely (cap restored)
+// the first year they fail to win the WDC.
+export function effectiveCap(team: Team): number {
+  return team.marketPoints - team.championStreak;
+}
+
 export function remainingPoints(
   team: Team,
   drivers: Driver[],
   engDirs: EngineeringDirector[],
   raceDirs: RaceDirector[]
 ): number {
-  return team.marketPoints - carPointCost(team) - currentPersonnelCost(team, drivers, engDirs, raceDirs);
+  return effectiveCap(team) - carPointCost(team) - currentPersonnelCost(team, drivers, engDirs, raceDirs);
 }
 
 // ============================================================================
@@ -532,6 +541,179 @@ export function revertTempCarUpgrades(teams: Team[]): void {
     t.car.turning      = Math.max(0, t.car.turning      - t.tempCarUpgrade.turning);
     t.car.reliability  = Math.max(0, t.car.reliability  - t.tempCarUpgrade.reliability);
     t.tempCarUpgrade = null;
+  }
+}
+
+// Update championship streaks after a season. The team whose driver won the
+// WDC has its streak incremented; every other team's streak resets to 0.
+// The streak directly reduces effectiveCap, so a repeat champion is squeezed
+// progressively harder until they fail to win — at which point the entire
+// penalty is removed in one go.
+export function updateChampionStreaks(teams: Team[], wdcTeamId: string | null): void {
+  for (const t of teams) {
+    if (t.id === wdcTeamId) {
+      t.championStreak += 1;
+    } else {
+      t.championStreak = 0;
+    }
+  }
+}
+
+// Driver loyalty shuffle — runs at the start of preseason, before the draft.
+// Each signed driver has a small chance of requesting to leave their team and
+// entering free agency, even with a year left on a "contract". Probability is
+// higher for stronger drivers on teams that didn't win the constructors title
+// (restless ambition — they want a winning seat), and lower but still nonzero
+// for drivers already on the champion team. Released drivers go to FA where
+// the draft + replacement pass redistribute them.
+//
+// Returns the list of drivers who left (for preseason reporting).
+export function runDriverLoyaltyShuffle(
+  teams: Team[],
+  drivers: Driver[],
+  constructorChampTeamId: string | null,
+  rng: RNG
+): Array<{ name: string; rarity: Rarity; fromTeam: string }> {
+  const driverMap = new Map(drivers.map(d => [d.id, d]));
+  const departures: Array<{ name: string; rarity: Rarity; fromTeam: string }> = [];
+
+  for (const t of teams) {
+    const onChampTeam = t.id === constructorChampTeamId;
+    // Evaluate each driver slot. Test drivers are far less likely to agitate.
+    const slots: Array<['driver1Id' | 'driver2Id' | 'testDriverId', boolean]> = [
+      ['driver1Id', false],
+      ['driver2Id', false],
+      ['testDriverId', true],
+    ];
+    for (const [slotKey, isTest] of slots) {
+      const id = t[slotKey];
+      if (!id) continue;
+      const d = driverMap.get(id);
+      if (!d) continue;
+
+      // Base leave chance by rarity. Anchored so a star driver sits around
+      // 1/10 — over a full grid this yields roughly 2-3 voluntary moves per
+      // season, enough that the driver market visibly churns without being
+      // chaotic. Lower rarities are stickier (they're glad to have a seat).
+      let chance =
+        d.rarity === 'legend'   ? 0.11 :
+        d.rarity === 'epic'     ? 0.10 :
+        d.rarity === 'rare'     ? 0.08 :
+        d.rarity === 'uncommon' ? 0.05 :
+        0.03;
+      // Champion-team drivers are more loyal — they're already winning.
+      if (onChampTeam) chance *= 0.5;
+      // Test drivers rarely force a move.
+      if (isTest) chance *= 0.5;
+
+      if (rng.next() < chance) {
+        // Driver leaves → slot cleared, driver becomes a free agent.
+        t[slotKey] = null;
+        departures.push({ name: d.name, rarity: d.rarity, fromTeam: t.name });
+      }
+    }
+  }
+  return departures;
+}
+
+// Off-season cap enforcement. After all market activity (draft + replacement +
+// car upgrade), no team may exceed its effective cap. Resolution order per the
+// design:
+//   1. If over cap, release the weakest person (driver or director) to free
+//      agency. Repeat until legal.
+//   2. Only if releasing everyone still leaves them over (shouldn't happen in
+//      practice) does the car regress.
+// This is what makes the champion cap penalty "bite" — a team docked enough
+// cap points is forced to shed a legend/epic, who then re-enters the market.
+//
+// Returns released people for preseason reporting.
+export function enforceCapCompliance(
+  teams: Team[],
+  drivers: Driver[],
+  engDirectors: EngineeringDirector[],
+  raceDirectors: RaceDirector[]
+): Array<{ name: string; rarity: Rarity; fromTeam: string; kind: 'driver' | 'engDirector' | 'raceDirector' }> {
+  const driverMap = new Map(drivers.map(d => [d.id, d]));
+  const engMap = new Map(engDirectors.map(e => [e.id, e]));
+  const rdMap = new Map(raceDirectors.map(r => [r.id, r]));
+  const released: Array<{ name: string; rarity: Rarity; fromTeam: string; kind: 'driver' | 'engDirector' | 'raceDirector' }> = [];
+
+  for (const t of teams) {
+    // Keep releasing the weakest person until the team is within cap.
+    let guard = 0;
+    while (remainingPoints(t, drivers, engDirectors, raceDirectors) < 0 && guard < 10) {
+      guard++;
+      // Gather all releasable people with their rarity cost.
+      type Releasable = {
+        slot: 'driver1Id' | 'driver2Id' | 'testDriverId' | 'engDirectorId' | 'raceDirectorId';
+        kind: 'driver' | 'engDirector' | 'raceDirector';
+        id: string;
+        name: string;
+        rarity: Rarity;
+        rarityRank: number;
+      };
+      const people: Releasable[] = [];
+      const pushDriver = (slot: 'driver1Id' | 'driver2Id' | 'testDriverId') => {
+        const id = t[slot];
+        if (!id) return;
+        const d = driverMap.get(id);
+        if (!d) return;
+        people.push({ slot, kind: 'driver', id, name: d.name, rarity: d.rarity, rarityRank: rarityOrder(d.rarity) });
+      };
+      pushDriver('driver1Id');
+      pushDriver('driver2Id');
+      pushDriver('testDriverId');
+      if (t.engDirectorId) {
+        const e = engMap.get(t.engDirectorId);
+        if (e) people.push({ slot: 'engDirectorId', kind: 'engDirector', id: e.id, name: e.name, rarity: e.rarity, rarityRank: rarityOrder(e.rarity) });
+      }
+      if (t.raceDirectorId) {
+        const r = rdMap.get(t.raceDirectorId);
+        if (r) people.push({ slot: 'raceDirectorId', kind: 'raceDirector', id: r.id, name: r.name, rarity: r.rarity, rarityRank: rarityOrder(r.rarity) });
+      }
+      if (people.length === 0) break;
+
+      // Release the HIGHEST-rarity person — that frees the most cap. The point
+      // of the penalty is to force champions to give up their stars. (Releasing
+      // the weakest would barely move the needle and they'd never recover cap.)
+      people.sort((a, b) => b.rarityRank - a.rarityRank);
+      const victim = people[0];
+      t[victim.slot] = null;
+      released.push({ name: victim.name, rarity: victim.rarity, fromTeam: t.name, kind: victim.kind });
+    }
+
+    // Fallback: if somehow still over cap after releasing everyone possible,
+    // regress the car stat-by-stat until legal.
+    let carGuard = 0;
+    while (remainingPoints(t, drivers, engDirectors, raceDirectors) < 0 && carGuard < 40) {
+      carGuard++;
+      // Drop the highest car stat by 1 (keeps the car balanced as it shrinks).
+      const stats: Array<keyof Pick<typeof t.car, 'maxSpeed' | 'acceleration' | 'turning' | 'reliability'>> =
+        ['maxSpeed', 'acceleration', 'turning', 'reliability'];
+      stats.sort((a, b) => t.car[b] - t.car[a]);
+      t.car[stats[0]] = Math.max(40, t.car[stats[0]] - 1);
+    }
+  }
+  return released;
+}
+
+// Guaranteed car regression for a team that won BOTH titles (WDC + WCC) in the
+// same season. Applied during the car re-roll step in addition to the normal
+// position-based drift. This is deterministic — a double champion's car always
+// goes backwards, no luck involved.
+export function applyDoubleChampionCarRegression(car: CarStats, rng: RNG): void {
+  // Remove ~6-9 points spread across the four stats. Roughly the inverse of
+  // a strong car-upgrade. Always applied, never random in whether it happens —
+  // only the distribution is randomized.
+  const total = rng.int(6, 9);
+  for (let i = 0; i < total; i++) {
+    const stats: Array<keyof Pick<CarStats, 'maxSpeed' | 'acceleration' | 'turning' | 'reliability'>> =
+      ['maxSpeed', 'acceleration', 'turning', 'reliability'];
+    // Drop a random stat, biased toward the currently-highest so the car
+    // regresses from its strengths.
+    stats.sort((a, b) => car[b] - car[a]);
+    const pick = rng.next() < 0.6 ? stats[0] : stats[rng.int(0, 3)];
+    car[pick] = Math.max(40, car[pick] - 1);
   }
 }
 
