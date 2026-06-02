@@ -313,6 +313,7 @@ export function createTeams(rng: RNG): Team[] {
     raceDirectorId: null,
     marketPoints: t.tier === 'top' ? 17 : 13,
     championStreak: 0,
+    titleDrought: 0,
     tempCarUpgrade: null,
     seasonPoints: 0,
     seasonWins: 0,

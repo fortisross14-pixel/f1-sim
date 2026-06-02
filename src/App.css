@@ -2587,7 +2587,7 @@ button.universe-delete-link:hover {
 /* ============================================================================ */
 
 /* ----- Gear menu (top right) ----- */
-.gear-menu-container { position: relative; }
+.gear-menu-container { position: relative; z-index: 90; }
 .gear-btn {
   background: rgba(255,255,255,0.08);
   color: white;

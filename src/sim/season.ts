@@ -1,6 +1,6 @@
 import {
   Driver, Team, EngineeringDirector, RaceDirector,
-  SeasonState, GamePhase, Rarity, POOL_RARITY_TARGETS,
+  SeasonState, GamePhase, Rarity, POOL_RARITY_TARGETS, RARITY_COST,
   RaceResult, PreseasonData, DriverYearRecord,
   CircuitHistoryEntry, Weather, CarStats,
 } from './types';
@@ -291,11 +291,15 @@ function snapshotYearHistory(
     const racesThisYear = position === 'driver1' || position === 'driver2'
       ? state.calendar.length
       : 0;
+    // Standing position: where did this driver finish in the WDC rankings?
+    // +1 because findIndex is 0-based but standings are 1-based.
+    const standingPos = finalDriverStandingsByPos.findIndex(s => s.driverId === d.id) + 1;
     d.yearHistory.push({
       year: state.year,
       teamId: team?.id ?? null,
       teamName: team?.name ?? '—',
       position,
+      standingPosition: standingPos > 0 ? standingPos : 0, // 0 if not in standings (shouldn't happen for active drivers)
       races: racesThisYear,
       wins: d.seasonWins,
       podiums: d.seasonPodiums,
@@ -416,6 +420,7 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   const championDriver = championDriverId ? driverMap.get(championDriverId) : undefined;
   const mostWinsDriver = state.drivers.slice().sort((a, b) => b.seasonWins - a.seasonWins)[0];
   const mostPolesDriver = state.drivers.slice().sort((a, b) => b.seasonPoles - a.seasonPoles)[0];
+  const mostPolesCount = mostPolesDriver?.seasonPoles ?? 0;
   const rookies = state.drivers.filter(d => d.age - d.careerStartAge === 0);
   const roy = rookies.length
     ? rookies.slice().sort((a, b) => b.seasonPoints - a.seasonPoints)[0]
@@ -561,7 +566,7 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
   // ---- 10) Update championship streaks ----
   // Must run before the draft so effectiveCap reflects the new penalty.
   // The WDC team's streak grows by 1; everyone else resets to 0 (cap restored).
-  updateChampionStreaks(state.teams, wdcTeamId);
+  updateChampionStreaks(state.teams, wdcTeamId, constructorChampTeamId ?? null);
 
   // ---- 11) Re-roll cars ----
   // tempCarUpgrade is reverted implicitly here — re-rolling t.car replaces the
@@ -677,6 +682,70 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     state.freeAgentRaceDirectorIds = state.raceDirectors.filter(r => !assignedR.has(r.id)).map(r => r.id);
   }
 
+  // ---- Fill empty slots guarantee ----
+  // After all market activity (draft + replacement + cap enforcement), no team
+  // should start a season with empty driver slots if free agents are available.
+  // This catches edge cases where cap enforcement released a driver and the
+  // draft had already completed, leaving a gap.
+  {
+    const faDrivers = new Set(state.freeAgentDriverIds);
+    const driverMap = new Map(state.drivers.map(d => [d.id, d]));
+    for (const t of state.teams) {
+      const slots: Array<'driver1Id' | 'driver2Id' | 'testDriverId'> = ['driver1Id', 'driver2Id', 'testDriverId'];
+      for (const slot of slots) {
+        if (t[slot]) continue;
+        if (faDrivers.size === 0) break;
+        // Pick the cheapest available free agent (common first) to avoid
+        // budget violations. Sort by rarity cost ascending.
+        const candidates = [...faDrivers]
+          .map(id => driverMap.get(id)!)
+          .filter(Boolean)
+          .sort((a, b) => RARITY_COST[a.rarity] - RARITY_COST[b.rarity]);
+        if (candidates.length === 0) break;
+        const pick = candidates[0];
+        t[slot] = pick.id;
+        faDrivers.delete(pick.id);
+      }
+    }
+    // Similarly for directors
+    const faEng = new Set(state.freeAgentEngDirectorIds);
+    const engMap = new Map(state.engineeringDirectors.map(e => [e.id, e]));
+    const faRace = new Set(state.freeAgentRaceDirectorIds);
+    const rdMap = new Map(state.raceDirectors.map(r => [r.id, r]));
+    for (const t of state.teams) {
+      if (!t.engDirectorId && faEng.size > 0) {
+        const candidates = [...faEng].map(id => engMap.get(id)!).filter(Boolean)
+          .sort((a, b) => RARITY_COST[a.rarity] - RARITY_COST[b.rarity]);
+        if (candidates.length > 0) {
+          t.engDirectorId = candidates[0].id;
+          faEng.delete(candidates[0].id);
+        }
+      }
+      if (!t.raceDirectorId && faRace.size > 0) {
+        const candidates = [...faRace].map(id => rdMap.get(id)!).filter(Boolean)
+          .sort((a, b) => RARITY_COST[a.rarity] - RARITY_COST[b.rarity]);
+        if (candidates.length > 0) {
+          t.raceDirectorId = candidates[0].id;
+          faRace.delete(candidates[0].id);
+        }
+      }
+    }
+    // Update free agent lists one final time
+    const finalAssignedD = new Set<string>();
+    const finalAssignedE = new Set<string>();
+    const finalAssignedR = new Set<string>();
+    for (const t of state.teams) {
+      if (t.driver1Id) finalAssignedD.add(t.driver1Id);
+      if (t.driver2Id) finalAssignedD.add(t.driver2Id);
+      if (t.testDriverId) finalAssignedD.add(t.testDriverId);
+      if (t.engDirectorId) finalAssignedE.add(t.engDirectorId);
+      if (t.raceDirectorId) finalAssignedR.add(t.raceDirectorId);
+    }
+    state.freeAgentDriverIds = state.drivers.filter(d => !finalAssignedD.has(d.id)).map(d => d.id);
+    state.freeAgentEngDirectorIds = state.engineeringDirectors.filter(e => !finalAssignedE.has(e.id)).map(e => e.id);
+    state.freeAgentRaceDirectorIds = state.raceDirectors.filter(r => !finalAssignedR.has(r.id)).map(r => r.id);
+  }
+
   // ---- 13) Car upgrade pass: teams with exactly 3 spare points upgrade their car ----
   // Stored on the team as tempCarUpgrade so it can be reverted next preseason.
   runCarUpgradePass(state.teams, state.drivers, state.engineeringDirectors, state.raceDirectors, rng);
@@ -712,7 +781,7 @@ export function advanceToNewSeason(state: SeasonState, rng: RNG): PreseasonData 
     constructorChampionTeamId: constructorChampTeamId ?? '',
     mostWinsDriverId: mostWinsDriver?.id ?? '',
     mostPolesDriverId: mostPolesDriver?.id ?? '',
-    mostPolesCount: mostPolesDriver?.seasonPoles ?? 0,
+    mostPolesCount: mostPolesCount,
     rookieOfYearDriverId: roy?.id ?? null,
     finalDriverStandings,
     finalTeamStandings,

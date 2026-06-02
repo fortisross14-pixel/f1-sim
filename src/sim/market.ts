@@ -65,13 +65,19 @@ export function currentPersonnelCost(
   return cost;
 }
 
-// A team's effective budget cap for the season. Base cap (13 or 17) minus
-// the championship-streak penalty: each consecutive WDC costs 1 cap point,
-// unbounded. A 4-time-champion team runs at base − 4, which typically forces
-// them to sell a legend or epic. The penalty vanishes entirely (cap restored)
-// the first year they fail to win the WDC.
+// A team's effective budget cap for the season.
+//
+// The cap starts from the base (13 or 17) then:
+//  - Subtracts the championship-streak penalty (−1 per consecutive WDC)
+//  - Adds the title-drought bonus (+1 per 2 consecutive drought years, i.e.
+//    +1 at 2yr, +2 at 4yr, +3 at 6yr, etc.). This gives struggling teams
+//    extra budget to raid FA or lower teams for a star.
+//
+// The drought bonus ONLY applies to top-tier teams. Mid/bottom don't get the
+// "desperate raid" dynamic — they rely on the normal draft order advantage.
 export function effectiveCap(team: Team): number {
-  return team.marketPoints - team.championStreak;
+  const droughtBonus = team.tier === 'top' ? Math.floor(team.titleDrought / 2) : 0;
+  return team.marketPoints - team.championStreak + droughtBonus;
 }
 
 export function remainingPoints(
@@ -544,17 +550,27 @@ export function revertTempCarUpgrades(teams: Team[]): void {
   }
 }
 
-// Update championship streaks after a season. The team whose driver won the
-// WDC has its streak incremented; every other team's streak resets to 0.
-// The streak directly reduces effectiveCap, so a repeat champion is squeezed
-// progressively harder until they fail to win — at which point the entire
-// penalty is removed in one go.
-export function updateChampionStreaks(teams: Team[], wdcTeamId: string | null): void {
+// Update championship streaks + title droughts after a season.
+// - The team whose driver won the WDC has its streak incremented; others reset.
+// - Any team that won EITHER the WDC or WCC has its drought reset to 0.
+//   All other teams increment their drought by 1.
+export function updateChampionStreaks(
+  teams: Team[],
+  wdcTeamId: string | null,
+  wccTeamId: string | null
+): void {
   for (const t of teams) {
+    // Champion streak (WDC only)
     if (t.id === wdcTeamId) {
       t.championStreak += 1;
     } else {
       t.championStreak = 0;
+    }
+    // Title drought (either WDC or WCC wins break it)
+    if (t.id === wdcTeamId || t.id === wccTeamId) {
+      t.titleDrought = 0;
+    } else {
+      t.titleDrought += 1;
     }
   }
 }

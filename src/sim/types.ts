@@ -62,9 +62,10 @@ export type CareerStage = 'rookie' | 'prime' | 'veteran';
 // Powers the "year-by-year" table in the driver detail popup.
 export interface DriverYearRecord {
   year: number;
-  teamId: string | null;  // null if free agent that year (rare — usually they're on test driver slot)
-  teamName: string;       // captured at the time so post-rename still reads correctly
+  teamId: string | null;
+  teamName: string;
   position: 'driver1' | 'driver2' | 'testDriver' | 'free_agent';
+  standingPosition: number;   // where they finished in the WDC standings (1 = champion)
   races: number;
   wins: number;
   podiums: number;
@@ -238,6 +239,12 @@ export interface Team {
   // runs at marketPoints − 4). Resets to 0 the first year they don't win the
   // WDC, restoring the full cap in one swing. This is the core dynasty-breaker.
   championStreak: number;
+  // Consecutive years without winning either WDC or WCC. Provides a cap
+  // boost for struggling top teams: +1 at 2 years, +2 at 4 years, etc.
+  // The extra points are earmarked for signing FA stars. Resets to 0 the
+  // year they win a title — the extra cap vanishes, possibly forcing a
+  // squad readjustment.
+  titleDrought: number;
   // Temporary car upgrade purchased with spare budget points at end of preseason.
   // Applied when a team has exactly 3 spare points after market resolves and can't
   // sign anyone else. Reverts at the start of the next preseason — those points

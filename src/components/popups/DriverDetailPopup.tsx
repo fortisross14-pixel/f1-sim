@@ -89,6 +89,7 @@ export function DriverDetailPopup({ driver, onClose }: { driver: Driver; onClose
           <thead>
             <tr>
               <th>Year</th><th>Team</th>
+              <th className="num">Pos</th>
               <th className="num">Races</th>
               <th className="num">Wins</th>
               <th className="num">Pod</th>
@@ -103,6 +104,13 @@ export function DriverDetailPopup({ driver, onClose }: { driver: Driver; onClose
                 <td><strong>{y.year}</strong></td>
                 <td style={{ color: teamMap.get(y.teamId ?? '')?.color, fontWeight: 600 }}>
                   {y.teamName}
+                </td>
+                <td className="num">
+                  {y.standingPosition > 0 ? (
+                    <span className={`pos-badge ${y.standingPosition === 1 ? 'pos-1' : y.standingPosition === 2 ? 'pos-2' : y.standingPosition === 3 ? 'pos-3' : ''}`}>
+                      {y.standingPosition}
+                    </span>
+                  ) : '—'}
                 </td>
                 <td className="num">{y.races}</td>
                 <td className="num">{y.wins}</td>
